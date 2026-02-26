@@ -4,6 +4,7 @@
   "description": "A simple CAP project.",
   "dependencies": {
     "@cap-js/hana": "^2.6.0",
+    "@google/generative-ai": "^0.24.1",
     "@sap/cds": "^9",
     "cors": "^2.8.6",
     "express": "^4"

@@ -1,6 +1,6 @@
 const cds = require('@sap/cds');
 const cors = require('cors');
-
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 cds.on('bootstrap', app => {
     // This allows your React app (or any local app) to securely hit the CAP endpoints
     app.use(cors({ origin: '*' })); 
@@ -16,8 +16,7 @@ module.exports = cds.service.impl(async function () {
         const results = await Promise.allSettled([
             callGemini(prompt, systemInstruction),
             callClaude(prompt, systemInstruction),
-            callGPT4o(prompt, systemInstruction),
-            callAzure(prompt, systemInstruction)
+            callGPT4o(prompt, systemInstruction)
         ]);
 
         return results.map(result => {
@@ -36,7 +35,6 @@ module.exports = cds.service.impl(async function () {
         });
     });
 
-    // Secondary Action: Continuing a 1-on-1 Chat
     this.on('sendChatMessage', async (req) => {
         const { modelId, prompt, history } = req.data;
         const systemInstruction = "You are an expert SAP developer specializing in ABAP and SAP CAPM.";
@@ -59,8 +57,6 @@ module.exports = cds.service.impl(async function () {
                     const gptRes = await callGPT4o(prompt, systemInstruction);
                     responseText = gptRes.content;
                     break;
-                case 'azure':
-                    break;
                 default:
                     req.reject(400, `Unsupported model: ${modelId}`);
             }
@@ -72,89 +68,94 @@ module.exports = cds.service.impl(async function () {
     });
 });
 
-
 async function callGemini(prompt, systemInstruction) {
     const start = Date.now();
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY missing");
+    try {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) return { modelId: 'gemini', content: "API Key missing in .env", latency: 0, error: true };
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
-    
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            system_instruction: { parts: { text: systemInstruction } },
-            contents: [{ parts: [{ text: prompt }] }]
-        })
-    });
-
-    if (!response.ok) throw new Error(`Gemini Error: ${response.status}`);
-    const data = await response.json();
-    
-    return {
-        modelId: 'gemini',
-        content: data.candidates[0].content.parts[0].text,
-        latency: Date.now() - start
-    };
+        const genAI = new GoogleGenerativeAI(apiKey);
+        
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-2.5-flash",
+            systemInstruction: systemInstruction
+        });
+        const result = await model.generateContent(prompt);
+        
+        return {
+            modelId: 'gemini',
+            content: result.response.text(),
+            latency: Date.now() - start
+        };
+    } catch (err) {
+        return { modelId: 'gemini', content: `Gemini SDK Error: ${err.message}`, latency: 0, error: true };
+    }
 }
 
 async function callClaude(prompt, systemInstruction) {
     const start = Date.now();
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error("ANTHROPIC_API_KEY missing");
+    try {
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) return { modelId: 'claude', content: "API Key missing in .env", latency: 0, error: true };
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-            model: 'claude-3-5-sonnet-20241022',
-            max_tokens: 2000,
-            system: systemInstruction,
-            messages: [{ role: 'user', content: prompt }]
-        })
-    });
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'claude-3-5-sonnet-20241022',
+                max_tokens: 1024, 
+                system: systemInstruction,
+                messages: [{ role: 'user', content: prompt }]
+            })
+        });
 
-    if (!response.ok) throw new Error(`Claude Error: ${response.status}`);
-    const data = await response.json();
+        const data = await response.json();
+        if (!response.ok) return { modelId: 'claude', content: `Claude API Error: ${response.status} - ${JSON.stringify(data)}`, latency: 0, error: true };
 
-    return {
-        modelId: 'claude',
-        content: data.content[0].text,
-        latency: Date.now() - start
-    };
+        return {
+            modelId: 'claude',
+            content: data.content[0].text,
+            latency: Date.now() - start
+        };
+    } catch (err) {
+        return { modelId: 'claude', content: `Network crash: ${err.message}`, latency: 0, error: true };
+    }
 }
 
 async function callGPT4o(prompt, systemInstruction) {
     const start = Date.now();
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY missing");
+    try {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) return { modelId: 'gpt4o', content: "API Key missing in .env", latency: 0, error: true };
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            model: 'gpt-4o',
-            messages: [
-                { role: 'system', content: systemInstruction },
-                { role: 'user', content: prompt }
-            ]
-        })
-    });
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                    { role: 'system', content: systemInstruction },
+                    { role: 'user', content: prompt }
+                ]
+            })
+        });
 
-    if (!response.ok) throw new Error(`OpenAI Error: ${response.status}`);
-    const data = await response.json();
+        const data = await response.json();
+        if (!response.ok) return { modelId: 'gpt4o', content: `OpenAI API Error: ${response.status} - ${JSON.stringify(data)}`, latency: 0, error: true };
 
-    return {
-        modelId: 'gpt4o',
-        content: data.choices[0].message.content,
-        latency: Date.now() - start
-    };
+        return {
+            modelId: 'gpt4o',
+            content: data.choices[0].message.content,
+            latency: Date.now() - start
+        };
+    } catch (err) {
+        return { modelId: 'gpt4o', content: `Network crash: ${err.message}`, latency: 0, error: true };
+    }
 }
