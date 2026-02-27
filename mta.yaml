@@ -1,0 +1,69 @@
+_schema-version: 3.3.0
+ID: ai-chatbackend
+version: 1.0.0
+description: "A simple CAP project."
+parameters:
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npx cds build --production
+modules:
+  - name: ai-chatbackend-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      instances: 1
+      buildpack: nodejs_buildpack
+    build-parameters:
+      builder: npm-ci
+    provides:
+      - name: srv-api # required by consumers of CAP services (e.g. approuter)
+        properties:
+          srv-url: ${default-url}
+    requires:
+      - name: ai-chatbackend-db
+      - name: ai-chatbackend-uaa
+      - name: ai-chatbackend-destination
+      - name: ai-chatbackend-connectivity
+
+  - name: ai-chatbackend-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+    requires:
+      - name: ai-chatbackend-db
+
+resources:
+  - name: ai-chatbackend-uaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: ai-chatbackend
+        tenant-mode: dedicated
+
+  # --- Destination Service (To find the on-prem system) ---
+  - name: ai-chatbackend-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+
+  # --- Connectivity Service (The tunnel to on-prem) ---
+  - name: ai-chatbackend-connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite
+
+  - name: ai-chatbackend-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
