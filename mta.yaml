@@ -24,7 +24,7 @@ modules:
         properties:
           srv-url: ${default-url}
     requires:
-      - name: ai-chatbackend-db
+      - name: ai-chat-backend-db
       - name: ai-chatbackend-uaa
       - name: ai-chatbackend-destination
       - name: ai-chatbackend-connectivity
@@ -35,7 +35,7 @@ modules:
     parameters:
       buildpack: nodejs_buildpack
     requires:
-      - name: ai-chatbackend-db
+      - name: ai-chat-backend-db
 
 resources:
   - name: ai-chatbackend-uaa
@@ -62,7 +62,7 @@ resources:
       service: connectivity
       service-plan: lite
 
-  - name: ai-chatbackend-db
+  - name: ai-chat-backend-db
     type: com.sap.xs.hdi-container
     parameters:
       service: hana
