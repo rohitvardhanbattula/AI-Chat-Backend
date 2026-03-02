@@ -16,3 +16,9 @@ entity ChatMessages : cuid, managed {
     modelId   : String(50);
     latency   : Integer;       
 }
+
+// Ensure proper fast lookups and default OData behavior
+annotate ChatMessages with @(
+    Common.DefaultValues : { session_ID : null },
+    Capabilities.FilterRestrictions : { RequiresFilter : true }
+);
