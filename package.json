@@ -5,6 +5,7 @@
   "dependencies": {
     "@cap-js/hana": "^2.6.0",
     "@google/generative-ai": "^0.24.1",
+    "@sap-ai-sdk/orchestration": "^2.7.0",
     "@sap-cloud-sdk/connectivity": "^4.5.1",
     "@sap-cloud-sdk/http-client": "^4.5.1",
     "@sap/cds": "^9",
@@ -15,6 +16,36 @@
   "devDependencies": {
     "@cap-js/sqlite": "^2",
     "@sap/cds-dk": "^9"
+  },
+  "cds": {
+    "server": {
+      "body_parser": {
+        "limit": "50mb"
+      }
+    },
+    "requires": {
+      "gemini": {
+        "kind": "rest",
+        "credentials": {
+          "destination": "GENERATIVE_AI_HUB",
+          "path": "/inference/deployments/dd7aac3928a31a8f"
+        }
+      },
+      "openai": {
+        "kind": "rest",
+        "credentials": {
+          "destination": "GENERATIVE_AI_HUB",
+          "path": "/inference/deployments/d8625cb6882941b6"
+        }
+      },
+      "perplexity": {
+        "kind": "rest",
+        "credentials": {
+          "destination": "GENERATIVE_AI_HUB",
+          "path": "/inference/deployments/d2c621b3fd067a5e"
+        }
+      }
+    }
   },
   "scripts": {
     "start": "cds-serve"

@@ -17,7 +17,8 @@ module.exports = cds.service.impl(async function () {
         const results = await Promise.allSettled([
             callGemini(prompt, systemInstruction),
             callClaude(prompt, systemInstruction),
-            callGPT4o(prompt, systemInstruction)
+            callGPT4o(prompt, systemInstruction),
+            callSAPGenAIHub(prompt, systemInstruction)
         ]);
 
         return results.map(result => {
@@ -36,6 +37,8 @@ module.exports = cds.service.impl(async function () {
 
     this.on('sendChatMessage', async (req) => {
         const { sessionId, modelId, prompt } = req.data;
+        // Normalize modelId to lowercase to prevent switch-case mismatches
+        const normalizedModelId = modelId ? modelId.toLowerCase() : "";
         const systemInstruction = "You are an expert SAP developer specializing in ABAP and SAP CAPM.";
 
         const messagesData = await SELECT.from('sap.aigateway.ChatMessages')
@@ -58,7 +61,8 @@ module.exports = cds.service.impl(async function () {
         let latency = 0;
 
         try {
-            switch (modelId) {
+            // Use normalizedModelId here!
+            switch (normalizedModelId) {
                 case 'gemini':
                     const gemRes = await callGemini(prompt, systemInstruction, history);
                     responseText = gemRes.content;
@@ -74,8 +78,13 @@ module.exports = cds.service.impl(async function () {
                     responseText = gptRes.content;
                     latency = gptRes.latency;
                     break;
+                case 'perplexity':
+                    const sapRes = await callSAPGenAIHub(prompt, systemInstruction, history);
+                    responseText = sapRes.content;
+                    latency = sapRes.latency;
+                    break;
                 default:
-                    req.reject(400, `Unsupported model: ${modelId}`);
+                    return req.reject(400, `Unsupported model: ${modelId}`);
             }
 
             await INSERT.into('sap.aigateway.ChatMessages').entries({
@@ -88,6 +97,12 @@ module.exports = cds.service.impl(async function () {
 
             return responseText;
         } catch (error) {
+            // Unmask the actual error to your console so you can debug future issues
+            console.error(`[ERROR] sendChatMessage failed for model ${modelId}:`, error);
+            
+            // If the error was a deliberate req.reject (like a 400), don't wrap it in a 500
+            if (error.code && error.code === '400') throw error;
+            
             req.reject(500, `Failed to communicate with ${modelId}`);
         }
     });
@@ -128,6 +143,46 @@ async function callGemini(prompt, systemInstruction, history = []) {
     }
 }
 
+async function callGPT4o(prompt, systemInstruction, history = []) {
+    const start = Date.now();
+    try {
+        const openai = await cds.connect.to("openai");
+        
+        const messages = [{ role: 'system', content: systemInstruction }];
+        history.forEach(m => messages.push({ role: m.role, content: m.content }));
+        messages.push({ role: 'user', content: prompt });
+        
+        const payload = {
+            model: "gpt-5.2", 
+            temperature: 0.5,
+            messages: messages
+        };
+        
+        const response = await openai.send({
+            query: "POST /chat/completions?api-version=2024-02-15-preview",
+            data: payload,
+            headers: {
+                "AI-Resource-Group": "default", 
+                "Content-Type": "application/json"
+            }
+        });
+        
+        if (!response || !response.choices) {
+            throw new Error("AI response did not contain 'choices'.");
+        }
+        
+        return {
+            modelId: 'gpt4o',
+            content: response.choices[0].message.content,
+            latency: Date.now() - start
+        };
+        
+    } catch (err) {
+        console.error("GPT4o AI Proxy Call Failed:", err.message);
+        return { modelId: 'gpt4o', content: `SAP Gen AI Hub Error (GPT4o): ${err.message}`, latency: 0, error: true };
+    }
+}
+
 async function callClaude(prompt, systemInstruction, history = []) {
     const start = Date.now();
     try {
@@ -165,37 +220,46 @@ async function callClaude(prompt, systemInstruction, history = []) {
     }
 }
 
-async function callGPT4o(prompt, systemInstruction, history = []) {
+
+
+async function callSAPGenAIHub(prompt, systemInstruction, history = []) {
     const start = Date.now();
     try {
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey) return { modelId: 'gpt4o', content: "API Key missing in .env", latency: 0, error: true };
-
+        const openai = await cds.connect.to("perplexity");
+        
         const messages = [{ role: 'system', content: systemInstruction }];
         history.forEach(m => messages.push({ role: m.role, content: m.content }));
         messages.push({ role: 'user', content: prompt });
-
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
+        
+        const payload = {
+            model: "sonar",
+            max_tokens: 800,
+            temperature: 0.5,
+            messages: messages
+        };
+        
+        const response = await openai.send({
+            
+            query: "POST /chat/completions?api-version=2024-02-15-preview",
+            data: payload,
             headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: messages
-            })
+                "AI-Resource-Group": "default", 
+                "Content-Type": "application/json"
+            }
         });
-
-        const data = await response.json();
-        if (!response.ok) return { modelId: 'gpt4o', content: `OpenAI API Error`, latency: 0, error: true };
-
+        
+        if (!response || !response.choices) {
+            throw new Error("AI response did not contain 'choices'.");
+        }
+        
         return {
-            modelId: 'gpt4o',
-            content: data.choices[0].message.content,
+            modelId: 'perplexity',
+            content: response.choices[0].message.content,
             latency: Date.now() - start
         };
+        
     } catch (err) {
-        return { modelId: 'gpt4o', content: `Network crash: ${err.message}`, latency: 0, error: true };
+        console.error("AI Proxy Call Failed:", err.message);
+        return { modelId: 'perplexity', content: `SAP Gen AI Hub Error: ${err.message}`, latency: 0, error: true };
     }
 }
