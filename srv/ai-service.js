@@ -111,18 +111,26 @@ module.exports = cds.service.impl(async function () {
 async function callGemini(prompt, systemInstruction, history = []) {
     const start = Date.now();
     try {
+        const { VertexAI } = require('@google-cloud/vertexai');
+        const { getDestination } = require('@sap-cloud-sdk/connectivity');
+
+        const dest = await getDestination({ destinationName: 'geminivertex_api' });
+        const serviceAccountKey = dest.originalProperties;
         
-        const dest = await getDestination({ destinationName: 'gemini_api' });
-        console.log(dest);
-        const apiKey = dest.originalProperties.apikey; 
+        const vertexAI = new VertexAI({
+            project: serviceAccountKey.project_id,
+            location: 'us-central1',
+            googleAuthOptions: {
+                credentials: {
+                    client_email: serviceAccountKey.client_email,
+                    private_key: serviceAccountKey.private_key.replace(/\\n/g, '\n')
+                }
+            }
+        });
 
-        if (!apiKey) throw new Error("API Key not found in destination properties");
-        //if (!apiKey) return { modelId: 'gemini', content: "API Key missing in .env", latency: 0, error: true };
-
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.5-flash",
-            systemInstruction: systemInstruction
+        const model = vertexAI.getGenerativeModel({
+            model: 'gemini-2.0-flash',
+            systemInstruction: { parts: [{ text: systemInstruction }] }
         });
 
         const chatHistory = history.map(m => ({
@@ -132,14 +140,13 @@ async function callGemini(prompt, systemInstruction, history = []) {
 
         const chat = model.startChat({ history: chatHistory });
         const result = await chat.sendMessage(prompt);
-        
-        return {
-            modelId: 'gemini',
-            content: result.response.text(),
-            latency: Date.now() - start
-        };
+        const responseText = result.response.candidates[0].content.parts[0].text;
+
+        return { modelId: 'gemini', content: responseText, latency: Date.now() - start };
+
     } catch (err) {
-        return { modelId: 'gemini', content: `Gemini SDK Error: ${err.message}`, latency: 0, error: true };
+        console.error("Vertex AI Error:", err.message);
+        return { modelId: 'gemini', content: `Gemini Error: ${err.message}`, latency: 0, error: true };
     }
 }
 
