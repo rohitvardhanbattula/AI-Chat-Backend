@@ -2,6 +2,11 @@ namespace sap.aigateway;
 
 using { cuid, managed } from '@sap/cds/common';
 
+entity Users : cuid, managed {
+    username : String(100) @unique;
+    password : String(255);
+}
+
 entity ChatSessions : cuid, managed {
     userId        : String(100);
     title         : String(255);
@@ -17,7 +22,13 @@ entity ChatMessages : cuid, managed {
     latency   : Integer;       
 }
 
-// Ensure proper fast lookups and default OData behavior
+entity Ratings : cuid, managed {
+    userId    : String(100);
+    modelId   : String(50);
+    category  : String(100);
+    rating    : Integer;
+}
+
 annotate ChatMessages with @(
     Common.DefaultValues : { session_ID : null },
     Capabilities.FilterRestrictions : { RequiresFilter : true }
