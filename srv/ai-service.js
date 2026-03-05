@@ -1,8 +1,47 @@
 const cds = require('@sap/cds');
 const { getDestination } = require('@sap-cloud-sdk/connectivity');
+const { Registry, MemoryFile } = require("@abaplint/core"); // <-- NEW
+
+// --- NEW ABAPLINT HELPER FUNCTIONS ---
+async function validateAbapCode(abapCode) {
+    const registry = new Registry();
+    const file = new MemoryFile("z_generated_code.prog.abap", abapCode);
+    registry.addFile(file);
+    await registry.parseAsync();
+    const issues = registry.findIssues();
+
+    if (issues.length > 0) {
+        return issues.map(issue => `Line ${issue.getStart().getRow()}: ${issue.getMessage()}`);
+    }
+    return null;
+}
+
+async function extractAndValidateABAP(text) {
+    const abapRegex = /```abap\n([\s\S]*?)```/gi;
+    let match;
+    let allIssues = [];
+    let containsAbap = false;
+
+    while ((match = abapRegex.exec(text)) !== null) {
+        containsAbap = true;
+        const code = match[1];
+        const issues = await validateAbapCode(code);
+        if (issues) {
+            allIssues.push(...issues);
+        }
+    }
+
+    if (!containsAbap) return ""; // No ABAP code found in response
+
+    if (allIssues.length > 0) {
+        return "\n\n---\n**🔍 abaplint Analysis:**\n" + allIssues.map(i => `- ${i}`).join('\n');
+    }
+    return "\n\n---\n**🔍 abaplint Analysis:** ✅ No syntax issues found in the generated ABAP code.";
+}
+// --------------------------------------
 
 module.exports = cds.service.impl(async function () {
-    
+
     this.on('register', async (req) => {
         const { username, password } = req.data;
         const existing = await SELECT.one.from('sap.aigateway.Users').where({ username });
@@ -16,7 +55,7 @@ module.exports = cds.service.impl(async function () {
         const { username, password } = req.data;
         const user = await SELECT.one.from('sap.aigateway.Users').where({ username, password });
         if (!user) return req.reject(401, 'Invalid credentials');
-        return user.ID; 
+        return user.ID;
     });
 
     this.on('submitRating', async (req) => {
@@ -25,20 +64,35 @@ module.exports = cds.service.impl(async function () {
         return "Success";
     });
 
+    // NEW: Manual validation action
+    this.on('validateABAPCode', async (req) => {
+        const { code } = req.data;
+        const issues = await validateAbapCode(code);
+        return issues || ["✅ No syntax issues found."];
+    });
+
     this.on('generateMultiModelResponse', async (req) => {
         const { prompt } = req.data;
         const sysInst = "You are an expert SAP developer specializing in ABAP and SAP CAPM. Provide clean, optimized code.";
         const results = await Promise.allSettled([
             callGemini(prompt, sysInst), callGPT4o(prompt, sysInst), callSAPGenAIHub(prompt, sysInst)
         ]);
-        return results.map((result, index) => {
-            if (result.status === 'fulfilled') return result.value;
+
+        return Promise.all(results.map(async (result, index) => {
+            if (result.status === 'fulfilled') {
+                let responseData = result.value;
+                if (!responseData.error) {
+                    // Inject abaplint validation report into multi-model response
+                    const lintReport = await extractAndValidateABAP(responseData.content);
+                    responseData.content += lintReport;
+                }
+                return responseData;
+            }
             return { modelId: ["gemini", "gpt4o", "perplexity"][index] || "unknown", content: "Failed.", latency: 0, error: result.reason.message };
-        });
+        }));
     });
 
-    // NEW STREAMING METHOD
-    this.generateStream = async function(sessionId, modelId, prompt, onChunk) {
+    this.generateStream = async function (sessionId, modelId, prompt, onChunk) {
         const normalizedModelId = modelId ? modelId.toLowerCase() : "";
         const systemInstruction = "You are an expert SAP developer specializing in ABAP and SAP CAPM.";
 
@@ -58,29 +112,38 @@ module.exports = cds.service.impl(async function () {
                 const vertexAI = new VertexAI({ project: svcKey.project_id, location: 'us-central1', googleAuthOptions: { credentials: { client_email: svcKey.client_email, private_key: svcKey.private_key.replace(/\\n/g, '\n') } } });
                 const model = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction: { parts: [{ text: systemInstruction }] } });
                 const chatHistory = history.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
-                
-                // TRUE STREAMING FOR GEMINI
+
                 const resultStream = await model.startChat({ history: chatHistory }).sendMessageStream(prompt);
                 for await (const chunk of resultStream.stream) {
-                    const chunkText = chunk.text();
-                    fullResponse += chunkText;
-                    onChunk(chunkText); // Emit immediately
+                    
+                    const chunkText = chunk.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+                    if (chunkText) {
+                        fullResponse += chunkText;
+                        onChunk(chunkText); // Emit immediately
+                    }
                 }
             } else if (normalizedModelId === 'claude') {
                 throw new Error("Claude is currently under build progress.");
             } else {
-                // Emulated streaming for SAP Proxy models (GPT/Perplexity)
                 let res = normalizedModelId === 'gpt4o' ? await callGPT4o(prompt, systemInstruction, history) : await callSAPGenAIHub(prompt, systemInstruction, history);
                 fullResponse = res.content;
-                
-                // Stream the fetched response to the UI rapidly to simulate typing
-                const chunkSize = 10; 
+
+                const chunkSize = 10;
                 for (let i = 0; i < fullResponse.length; i += chunkSize) {
                     onChunk(fullResponse.slice(i, i + chunkSize));
-                    await new Promise(r => setTimeout(r, 10)); // 10ms delay between words
+                    await new Promise(r => setTimeout(r, 10));
                 }
             }
 
+            // --- NEW: Post-Process with ABAPLint ---
+            const lintReport = await extractAndValidateABAP(fullResponse);
+            if (lintReport) {
+                fullResponse += lintReport;
+                onChunk(lintReport); // Send the report as the final chunk to the UI
+            }
+
+            // Save the combined text (AI Answer + Validation Report) to DB
             await INSERT.into('sap.aigateway.ChatMessages').entries({
                 session_ID: sessionId, role: 'assistant', content: fullResponse, modelId: modelId, latency: Date.now() - latencyStart
             });

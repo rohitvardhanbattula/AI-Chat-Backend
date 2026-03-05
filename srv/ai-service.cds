@@ -18,4 +18,5 @@ service AIService {
     action login(username: String, password: String) returns String;
     action register(username: String, password: String) returns String;
     action submitRating(userId: String, modelId: String, category: String, rating: Integer) returns String;
+    action validateABAPCode(code: LargeString) returns array of String;
 }

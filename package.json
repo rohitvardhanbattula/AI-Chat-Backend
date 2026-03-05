@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A simple CAP project.",
   "dependencies": {
+    "@abaplint/core": "^2.115.28",
     "@cap-js/hana": "^2.6.0",
     "@google-cloud/vertexai": "^1.10.0",
     "@google/generative-ai": "^0.24.1",
@@ -29,7 +30,7 @@
     },
     "requires": {
       "auth": {
-        "kind":"dummy"
+        "kind": "dummy"
       },
       "gemini": {
         "kind": "rest",
