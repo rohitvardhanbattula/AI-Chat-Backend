@@ -1,8 +1,7 @@
 const cds = require('@sap/cds');
 const { getDestination } = require('@sap-cloud-sdk/connectivity');
-const { Registry, MemoryFile } = require("@abaplint/core"); // <-- NEW
+const { Registry, MemoryFile } = require("@abaplint/core");
 
-// --- NEW ABAPLINT HELPER FUNCTIONS ---
 async function validateAbapCode(abapCode) {
     const registry = new Registry();
     const file = new MemoryFile("z_generated_code.prog.abap", abapCode);
@@ -10,35 +9,89 @@ async function validateAbapCode(abapCode) {
     await registry.parseAsync();
     const issues = registry.findIssues();
 
-    if (issues.length > 0) {
-        return issues.map(issue => `Line ${issue.getStart().getRow()}: ${issue.getMessage()}`);
+    // 🛑 AGGRESSIVE FILTER: Ignore stylistic, formatting, and noisy rules
+    const ignoredPhrases = [
+        "align ",
+        "change if to case",
+        "end of line comments",
+        "name too long",
+        "text element",
+        "exit is not allowed",
+        "specify table key",
+        "functional writing style",
+        "indentation",
+        "does not match pattern",
+        "main file must have specific contents",
+        "only one statement is allowed",
+        "hungarian notation",
+        "is obsolete",
+        "statement does not exist", // Catches the *& comment parsing errors
+        "reduce procedural code",
+        "add order by",
+        "remove space",
+        "remove whitespace",
+        "start statement at tab",
+        "strict sql", // Catches "INTO/APPENDING must be last"
+        "unnecessary chaining",
+        "must be escaped with @",
+        "empty event",
+        "specify table type",
+        "not found, findtop"
+    ];
+
+    const highRiskIssues = issues.filter(issue => {
+        const severity = issue.getSeverity();
+        const message = issue.getMessage().toLowerCase();
+
+        const isHighSeverity = (severity === 1 || severity === 2 || severity === 'Error');
+
+        const isIgnored = ignoredPhrases.some(phrase => message.includes(phrase));
+
+        return isHighSeverity && !isIgnored;
+    });
+
+    if (highRiskIssues.length > 0) {
+        return {
+            count: highRiskIssues.length,
+            issues: highRiskIssues.map(issue => `Line ${issue.getStart().getRow()}: ${issue.getMessage()}`)
+        };
     }
     return null;
 }
 
 async function extractAndValidateABAP(text) {
-    const abapRegex = /```abap\n([\s\S]*?)```/gi;
+    const abapRegex = /```abap\s*?\n([\s\S]*?)```/gi;
     let match;
     let allIssues = [];
     let containsAbap = false;
+    let errorCount = 0;
 
     while ((match = abapRegex.exec(text)) !== null) {
         containsAbap = true;
         const code = match[1];
-        const issues = await validateAbapCode(code);
-        if (issues) {
-            allIssues.push(...issues);
+        const validationResult = await validateAbapCode(code);
+        if (validationResult) {
+            allIssues.push(...validationResult.issues);
+            errorCount += validationResult.count;
         }
     }
 
-    if (!containsAbap) return ""; // No ABAP code found in response
+    if (!containsAbap) return { report: "", count: 0, hasAbap: false };
 
     if (allIssues.length > 0) {
-        return "\n\n---\n**🔍 abaplint Analysis:**\n" + allIssues.map(i => `- ${i}`).join('\n');
+        return {
+            report: "\n\n---\n** Abaplint Analysis:**\n" + allIssues.map(i => `- ${i}`).join('\n'),
+            count: errorCount,
+            hasAbap: true
+        };
     }
-    return "\n\n---\n**🔍 abaplint Analysis:** ✅ No syntax issues found in the generated ABAP code.";
+    return {
+        report: "\n\n---\n** abaplint Analysis:** No high-risk syntax issues found in the generated ABAP code.",
+        count: 0,
+        hasAbap: true
+    };
 }
-// --------------------------------------
+
 
 module.exports = cds.service.impl(async function () {
 
@@ -64,16 +117,15 @@ module.exports = cds.service.impl(async function () {
         return "Success";
     });
 
-    // NEW: Manual validation action
     this.on('validateABAPCode', async (req) => {
         const { code } = req.data;
-        const issues = await validateAbapCode(code);
-        return issues || ["✅ No syntax issues found."];
+        const validation = await validateAbapCode(code);
+        return validation ? validation.issues : ["No high-risk syntax issues found."];
     });
 
     this.on('generateMultiModelResponse', async (req) => {
         const { prompt } = req.data;
-        const sysInst = "You are an expert SAP developer specializing in ABAP and SAP CAPM. Provide clean, optimized code.";
+        const sysInst = "You are an expert SAP developer specializing in ABAP and SAP CAPM. Provide clean, optimized code. Always wrap your ABAP code in ```abap code blocks.";
         const results = await Promise.allSettled([
             callGemini(prompt, sysInst), callGPT4o(prompt, sysInst), callSAPGenAIHub(prompt, sysInst)
         ]);
@@ -82,9 +134,16 @@ module.exports = cds.service.impl(async function () {
             if (result.status === 'fulfilled') {
                 let responseData = result.value;
                 if (!responseData.error) {
-                    // Inject abaplint validation report into multi-model response
-                    const lintReport = await extractAndValidateABAP(responseData.content);
-                    responseData.content += lintReport;
+                    
+                    const validation = await extractAndValidateABAP(responseData.content);
+                    
+                    if (validation.hasAbap) {
+                        const topHeader = validation.count > 0 
+                            ? `** abaplint: ${validation.count} high-risk issue(s) found**\n\n` 
+                            : `** abaplint: 0 high-risk issues**\n\n`;
+                        
+                        responseData.content = topHeader + responseData.content + validation.report;
+                    }
                 }
                 return responseData;
             }
@@ -120,7 +179,7 @@ module.exports = cds.service.impl(async function () {
 
                     if (chunkText) {
                         fullResponse += chunkText;
-                        onChunk(chunkText); // Emit immediately
+                        onChunk(chunkText);
                     }
                 }
             } else if (normalizedModelId === 'claude') {
@@ -136,14 +195,13 @@ module.exports = cds.service.impl(async function () {
                 }
             }
 
-            // --- NEW: Post-Process with ABAPLint ---
-            const lintReport = await extractAndValidateABAP(fullResponse);
-            if (lintReport) {
-                fullResponse += lintReport;
-                onChunk(lintReport); // Send the report as the final chunk to the UI
+            const validation = await extractAndValidateABAP(fullResponse);
+            if (validation.report) {
+                fullResponse += validation.report;
+                onChunk(validation.report);
             }
 
-            // Save the combined text (AI Answer + Validation Report) to DB
+            
             await INSERT.into('sap.aigateway.ChatMessages').entries({
                 session_ID: sessionId, role: 'assistant', content: fullResponse, modelId: modelId, latency: Date.now() - latencyStart
             });
@@ -182,7 +240,7 @@ async function callSAPGenAIHub(prompt, systemInstruction, history = []) {
     try {
         const openai = await cds.connect.to("perplexity");
         const messages = [{ role: 'system', content: systemInstruction }, ...history, { role: 'user', content: prompt }];
-        const response = await openai.send({ query: "POST /chat/completions?api-version=2024-02-15-preview", data: { model: "sonar", max_tokens: 800, temperature: 0.5, messages: messages }, headers: { "AI-Resource-Group": "default", "Content-Type": "application/json" } });
+        const response = await openai.send({ query: "POST /chat/completions?api-version=2024-02-15-preview", data: { model: "sonar", max_tokens: 4000, temperature: 0.5, messages: messages }, headers: { "AI-Resource-Group": "default", "Content-Type": "application/json" } });
         if (!response || !response.choices) throw new Error("AI response did not contain 'choices'.");
         return { modelId: 'perplexity', content: response.choices[0].message.content, latency: Date.now() - start };
     } catch (err) { return { modelId: 'perplexity', content: `Perplexity Error: ${err.message}`, latency: 0, error: true }; }
