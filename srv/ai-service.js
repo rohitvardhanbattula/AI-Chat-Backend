@@ -114,11 +114,8 @@ module.exports = cds.service.impl(async function () {
             await sendMail({ destinationName: 'sap_process_automation_mail' }, [mailConfig]);
             return `An OTP has been sent to ${username}.`;
         } catch (error) {
-            console.error("Failed to send email:", error.message);
             return req.error(500, 'Could not send the verification email.');
         }
-
-        return "OTP_SENT";
     });
 
     this.on('verifyOTP', async (req) => {
@@ -162,13 +159,14 @@ module.exports = cds.service.impl(async function () {
         const { prompt } = req.data;
         const sysInst = "You are an expert SAP developer specializing in ABAP and SAP CAPM. Provide clean, optimized code. Always wrap your ABAP code in ```abap code blocks.";
         const results = await Promise.allSettled([
-            callGemini(prompt, sysInst), callGPT4o(prompt, sysInst), callSAPGenAIHub(prompt, sysInst)
+            callGemini(prompt, sysInst), callGPT4o(prompt, sysInst), callSAPGenAIHub(prompt, sysInst), callClaude(prompt, sysInst)
         ]);
 
         return Promise.all(results.map(async (result, index) => {
+            const models = ["gemini", "gpt4o", "perplexity", "claude"];
             if (result.status === 'fulfilled') {
                 let responseData = result.value;
-                if (!responseData.error) {
+                if (!responseData.error && responseData.content) {
                     const validation = await extractAndValidateABAP(responseData.content);
                     if (validation.hasAbap) {
                         const topHeader = validation.count > 0 
@@ -177,22 +175,25 @@ module.exports = cds.service.impl(async function () {
                         
                         responseData.content = topHeader + responseData.content + validation.report;
                     }
+                } else {
+                    responseData.content = "model is not available at the moment";
                 }
                 return responseData;
             }
-            return { modelId: ["gemini", "gpt4o", "perplexity"][index] || "unknown", content: "Failed.", latency: 0, error: result.reason.message };
+            return { modelId: models[index] || "unknown", content: "model is not available at the moment", latency: 0, error: true };
         }));
     });
 
     this.generateStream = async function (sessionId, modelId, prompt, onChunk) {
-        const userMessageCount = await SELECT.from('sap.aigateway.ChatMessages').where({ session_ID: sessionId, role: 'user' }).count();
-        if (userMessageCount >= 20) {
+        
+        const userMessageCount = await SELECT.from('sap.aigateway.ChatMessages').where({ session_ID: sessionId, role: 'user' });
+        if (userMessageCount.length >= 20) {
             throw new Error('Maximum prompt limit (20) reached for this chat. Please start a new chat.');
         }
-
+        
         const normalizedModelId = modelId ? modelId.toLowerCase() : "";
         const systemInstruction = "You are an expert SAP developer specializing in ABAP and SAP CAPM.";
-
+        
         const messagesData = await SELECT.from('sap.aigateway.ChatMessages').where({ session_ID: sessionId }).orderBy('createdAt asc');
         const history = messagesData.map(m => ({ role: m.role, content: m.content }));
 
@@ -218,30 +219,48 @@ module.exports = cds.service.impl(async function () {
                         onChunk(chunkText);
                     }
                 }
-            } else if (normalizedModelId === 'claude') {
-                throw new Error("Claude is currently under build progress.");
             } else {
-                let res = normalizedModelId === 'gpt4o' ? await callGPT4o(prompt, systemInstruction, history) : await callSAPGenAIHub(prompt, systemInstruction, history);
-                fullResponse = res.content;
+                let res;
+                if (normalizedModelId === 'claude') {
+                    res = await callClaude(prompt, systemInstruction, history);
+                } else if (normalizedModelId === 'gpt4o') {
+                    
+                    res = await callGPT4o(prompt, systemInstruction, history);
+                } else {
+                    res = await callSAPGenAIHub(prompt, systemInstruction, history);
+                }
 
-                const chunkSize = 10;
-                for (let i = 0; i < fullResponse.length; i += chunkSize) {
-                    onChunk(fullResponse.slice(i, i + chunkSize));
-                    await new Promise(r => setTimeout(r, 10));
+                if (res.error || !res.content) {
+                    fullResponse = "model is not available at the moment";
+                    onChunk(fullResponse);
+                } else {
+                    fullResponse = res.content;
+                    const chunkSize = 10;
+                    for (let i = 0; i < fullResponse.length; i += chunkSize) {
+                        onChunk(fullResponse.slice(i, i + chunkSize));
+                        await new Promise(r => setTimeout(r, 10));
+                    }
                 }
             }
 
-            const validation = await extractAndValidateABAP(fullResponse);
-            if (validation.report) {
-                fullResponse += validation.report;
-                onChunk(validation.report);
+            if (fullResponse !== "model is not available at the moment") {
+                const validation = await extractAndValidateABAP(fullResponse);
+                if (validation.report) {
+                    fullResponse += validation.report;
+                    onChunk(validation.report);
+                }
             }
 
             await INSERT.into('sap.aigateway.ChatMessages').entries({
                 session_ID: sessionId, role: 'assistant', content: fullResponse, modelId: modelId, latency: Date.now() - latencyStart
             });
 
-        } catch (error) { throw error; }
+        } catch (error) { 
+            onChunk("model is not available at the moment");
+            await INSERT.into('sap.aigateway.ChatMessages').entries({
+                session_ID: sessionId, role: 'assistant', content: "model is not available at the moment", modelId: modelId, latency: Date.now() - latencyStart
+            });
+        }
     };
 });
 
@@ -256,7 +275,7 @@ async function callGemini(prompt, systemInstruction, history = []) {
         const chatHistory = history.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
         const result = await model.startChat({ history: chatHistory }).sendMessage(prompt);
         return { modelId: 'gemini', content: result.response.candidates[0].content.parts[0].text, latency: Date.now() - start };
-    } catch (err) { return { modelId: 'gemini', content: `Gemini Error: ${err.message}`, latency: 0, error: true }; }
+    } catch (err) { return { modelId: 'gemini', content: "model is not available at the moment", latency: 0, error: true }; }
 }
 
 async function callGPT4o(prompt, systemInstruction, history = []) {
@@ -267,7 +286,7 @@ async function callGPT4o(prompt, systemInstruction, history = []) {
         const response = await openai.send({ query: "POST /chat/completions?api-version=2024-02-15-preview", data: { model: "gpt-5.2", temperature: 0.5, messages: messages }, headers: { "AI-Resource-Group": "default", "Content-Type": "application/json" } });
         if (!response || !response.choices) throw new Error("AI response did not contain 'choices'.");
         return { modelId: 'gpt4o', content: response.choices[0].message.content, latency: Date.now() - start };
-    } catch (err) { return { modelId: 'gpt4o', content: `GPT Error: ${err.message}`, latency: 0, error: true }; }
+    } catch (err) { return { modelId: 'gpt4o', content: "model is not available at the moment", latency: 0, error: err }; }
 }
 
 async function callSAPGenAIHub(prompt, systemInstruction, history = []) {
@@ -278,5 +297,41 @@ async function callSAPGenAIHub(prompt, systemInstruction, history = []) {
         const response = await openai.send({ query: "POST /chat/completions?api-version=2024-02-15-preview", data: { model: "sonar", max_tokens: 4000, temperature: 0.5, messages: messages }, headers: { "AI-Resource-Group": "default", "Content-Type": "application/json" } });
         if (!response || !response.choices) throw new Error("AI response did not contain 'choices'.");
         return { modelId: 'perplexity', content: response.choices[0].message.content, latency: Date.now() - start };
-    } catch (err) { return { modelId: 'perplexity', content: `Perplexity Error: ${err.message}`, latency: 0, error: true }; }
+    } catch (err) { return { modelId: 'perplexity', content: "model is not available at the moment", latency: 0, error: true }; }
+}
+
+async function callClaude(prompt, systemInstruction, history = []) {
+    const start = Date.now();
+    try {
+        const dest = await getDestination({ destinationName: 'claude_api' });
+        const apikey = dest.originalProperties.apikey;
+        
+        const formattedHistory = history.map(m => ({
+            role: m.role,
+            content: m.content
+        }));
+        
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: "POST",
+            headers: {
+                "x-api-key": apikey,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            },
+            body: JSON.stringify({
+                model: "claude-sonnet-4-20250514",
+                max_tokens: 8000,
+                system: systemInstruction,
+                messages: [...formattedHistory, { role: 'user', content: prompt }]
+            })
+        });
+
+        if (!response.ok) {
+            const errData = await response.text();
+            throw new Error(errData);
+        }
+
+        const data = await response.json();
+        return { modelId: 'claude', content: data.content[0].text, latency: Date.now() - start };
+    } catch (err) { return { modelId: 'claude', content: "model is not available at the moment", latency: 0, error: true }; }
 }

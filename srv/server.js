@@ -15,12 +15,12 @@ cds.on('bootstrap', app => {
 
         const { sessionId, modelId, prompt } = req.body;
         
-       
+        
         res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
 
         try {
             const srv = await cds.connect.to('AIService');
-            
+           
             
             await srv.generateStream(sessionId, modelId, prompt, (chunkText) => {
                 res.write(`data: ${JSON.stringify({ status: "chunk", content: chunkText })}\n\n`);
