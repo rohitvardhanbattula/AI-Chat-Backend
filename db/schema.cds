@@ -3,8 +3,11 @@ namespace sap.aigateway;
 using { cuid, managed } from '@sap/cds/common';
 
 entity Users : cuid, managed {
-    username : String(100) @unique;
-    password : String(255);
+    username   : String(100) @unique;
+    password   : String(255);
+    otp        : String(6);
+    otpExpiry  : Timestamp;
+    isVerified : Boolean default false;
 }
 
 entity ChatSessions : cuid, managed {

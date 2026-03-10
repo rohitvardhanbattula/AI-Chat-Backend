@@ -1,6 +1,8 @@
 const cds = require('@sap/cds');
 const { getDestination } = require('@sap-cloud-sdk/connectivity');
+const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
 const { Registry, MemoryFile } = require("@abaplint/core");
+const { sendMail } = require('@sap-cloud-sdk/mail-client');
 
 async function validateAbapCode(abapCode) {
     const registry = new Registry();
@@ -9,44 +11,22 @@ async function validateAbapCode(abapCode) {
     await registry.parseAsync();
     const issues = registry.findIssues();
 
-    // 🛑 AGGRESSIVE FILTER: Ignore stylistic, formatting, and noisy rules
     const ignoredPhrases = [
-        "align ",
-        "change if to case",
-        "end of line comments",
-        "name too long",
-        "text element",
-        "exit is not allowed",
-        "specify table key",
-        "functional writing style",
-        "indentation",
-        "does not match pattern",
-        "main file must have specific contents",
-        "only one statement is allowed",
-        "hungarian notation",
-        "is obsolete",
-        "statement does not exist", // Catches the *& comment parsing errors
-        "reduce procedural code",
-        "add order by",
-        "remove space",
-        "remove whitespace",
-        "start statement at tab",
-        "strict sql", // Catches "INTO/APPENDING must be last"
-        "unnecessary chaining",
-        "must be escaped with @",
-        "empty event",
-        "specify table type",
-        "not found, findtop"
+        "align ", "change if to case", "end of line comments", "name too long",
+        "text element", "exit is not allowed", "specify table key", "functional writing style",
+        "indentation", "does not match pattern", "main file must have specific contents",
+        "only one statement is allowed", "hungarian notation", "is obsolete",
+        "statement does not exist", "reduce procedural code", "add order by",
+        "remove space", "remove whitespace", "start statement at tab", "strict sql",
+        "unnecessary chaining", "must be escaped with @", "empty event",
+        "specify table type", "not found, findtop"
     ];
 
     const highRiskIssues = issues.filter(issue => {
         const severity = issue.getSeverity();
         const message = issue.getMessage().toLowerCase();
-
         const isHighSeverity = (severity === 1 || severity === 2 || severity === 'Error');
-
         const isIgnored = ignoredPhrases.some(phrase => message.includes(phrase));
-
         return isHighSeverity && !isIgnored;
     });
 
@@ -92,22 +72,77 @@ async function extractAndValidateABAP(text) {
     };
 }
 
-
 module.exports = cds.service.impl(async function () {
+
+    this.before('CREATE', 'ChatSessions', async (req) => {
+        const userId = req.data.userId;
+        if (userId) {
+            const sessionCount = await SELECT.from('sap.aigateway.ChatSessions').where({ userId: userId });
+            if (sessionCount.length >= 10) {
+                return req.reject(403, 'Maximum of 10 chats reached. Please delete an older chat to create a new one.');
+            }
+        }
+    });
 
     this.on('register', async (req) => {
         const { username, password } = req.data;
+        
+        if (!username.toLowerCase().endsWith('@answerthink.com')) {
+            return req.reject(400, 'Registration is restricted to @answerthink.com emails only.');
+        }
+
         const existing = await SELECT.one.from('sap.aigateway.Users').where({ username });
-        if (existing) return req.reject(400, 'Username already taken');
-        await INSERT.into('sap.aigateway.Users').entries({ username, password });
-        const newUser = await SELECT.one.from('sap.aigateway.Users').where({ username });
-        return newUser.ID;
+        if (existing && existing.isVerified) {
+            return req.reject(400, 'User already exists and is verified. Please log in.');
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+        if (existing && !existing.isVerified) {
+            await UPDATE('sap.aigateway.Users').set({ password, otp, otpExpiry }).where({ username });
+        } else {
+            await INSERT.into('sap.aigateway.Users').entries({ username, password, otp, otpExpiry, isVerified: false });
+        }
+
+        try {
+            const mailConfig = {
+                to: username,
+                subject: 'AnswerThink Enterprise AI Hub - Registration OTP',
+                text: `Your one-time password (OTP) is: ${otp}. It is valid for 10 minutes.`
+            };
+            await sendMail({ destinationName: 'sap_process_automation_mail' }, [mailConfig]);
+            return `An OTP has been sent to ${username}.`;
+        } catch (error) {
+            console.error("Failed to send email:", error.message);
+            return req.error(500, 'Could not send the verification email.');
+        }
+
+        return "OTP_SENT";
+    });
+
+    this.on('verifyOTP', async (req) => {
+        const { username, otp } = req.data;
+        const user = await SELECT.one.from('sap.aigateway.Users').where({ username, otp });
+
+        if (!user) return req.reject(400, 'Invalid OTP.');
+        if (new Date(user.otpExpiry) < new Date()) return req.reject(400, 'OTP has expired. Please register again.');
+
+        await UPDATE('sap.aigateway.Users').set({ isVerified: true, otp: null, otpExpiry: null }).where({ username });
+        return user.ID;
     });
 
     this.on('login', async (req) => {
         const { username, password } = req.data;
+        
+        if (!username.toLowerCase().endsWith('@answerthink.com')) {
+            return req.reject(400, 'Only @answerthink.com emails are allowed.');
+        }
+
         const user = await SELECT.one.from('sap.aigateway.Users').where({ username, password });
-        if (!user) return req.reject(401, 'Invalid credentials');
+        if (!user) return req.reject(401, 'Invalid credentials or Register your User');
+        if (!user.isVerified) return req.reject(403, 'Email not verified. Please register to generate a new OTP.');
+
         return user.ID;
     });
 
@@ -134,9 +169,7 @@ module.exports = cds.service.impl(async function () {
             if (result.status === 'fulfilled') {
                 let responseData = result.value;
                 if (!responseData.error) {
-                    
                     const validation = await extractAndValidateABAP(responseData.content);
-                    
                     if (validation.hasAbap) {
                         const topHeader = validation.count > 0 
                             ? `** abaplint: ${validation.count} high-risk issue(s) found**\n\n` 
@@ -152,6 +185,11 @@ module.exports = cds.service.impl(async function () {
     });
 
     this.generateStream = async function (sessionId, modelId, prompt, onChunk) {
+        const userMessageCount = await SELECT.from('sap.aigateway.ChatMessages').where({ session_ID: sessionId, role: 'user' }).count();
+        if (userMessageCount >= 20) {
+            throw new Error('Maximum prompt limit (20) reached for this chat. Please start a new chat.');
+        }
+
         const normalizedModelId = modelId ? modelId.toLowerCase() : "";
         const systemInstruction = "You are an expert SAP developer specializing in ABAP and SAP CAPM.";
 
@@ -174,9 +212,7 @@ module.exports = cds.service.impl(async function () {
 
                 const resultStream = await model.startChat({ history: chatHistory }).sendMessageStream(prompt);
                 for await (const chunk of resultStream.stream) {
-                    
                     const chunkText = chunk.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
                     if (chunkText) {
                         fullResponse += chunkText;
                         onChunk(chunkText);
@@ -201,7 +237,6 @@ module.exports = cds.service.impl(async function () {
                 onChunk(validation.report);
             }
 
-            
             await INSERT.into('sap.aigateway.ChatMessages').entries({
                 session_ID: sessionId, role: 'assistant', content: fullResponse, modelId: modelId, latency: Date.now() - latencyStart
             });
