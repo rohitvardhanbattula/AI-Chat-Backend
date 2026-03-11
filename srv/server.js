@@ -6,33 +6,31 @@ cds.on('bootstrap', app => {
     app.use(cors({ origin: '*' }));
     app.use(express.json());
 
-    app.use('/odata/streamChatMessage', (req, res, next) => {
+    const setStreamTimeout = (req, res, next) => {
         req.setTimeout(600000);
         res.setTimeout(600000);
         next();
-    });
-    
-    app.use('/odata/streamComparison', (req, res, next) => {
-        req.setTimeout(600000);
-        res.setTimeout(600000);
-        next();
-    });
+    };
+
+    app.use('/odata/streamChatMessage', setStreamTimeout);
+    app.use('/odata/streamComparison', setStreamTimeout);
 
     app.post('/odata/streamChatMessage', async (req, res) => {
         res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
 
         const { sessionId, modelId, prompt } = req.body;
-
         res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
 
         try {
             const srv = await cds.connect.to('AIService');
             await srv.generateStream(sessionId, modelId, prompt, (chunkText) => {
-                res.write(`data: ${JSON.stringify({ status: "chunk", content: chunkText })}\n\n`);
+                if (chunkText) {
+                    res.write(`data: ${JSON.stringify({ status: "chunk", content: chunkText })}\n\n`);
+                }
             });
 
             res.write(`data: ${JSON.stringify({ status: "done" })}\n\n`);
@@ -45,19 +43,20 @@ cds.on('bootstrap', app => {
 
     app.post('/odata/streamComparison', async (req, res) => {
         res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
 
         const { modelId, prompt } = req.body;
-
         res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
 
         try {
             const srv = await cds.connect.to('AIService');
             await srv.generateStreamNoSession(modelId, prompt, (chunkText) => {
-                res.write(`data: ${JSON.stringify({ status: "chunk", content: chunkText })}\n\n`);
+                if (chunkText) {
+                    res.write(`data: ${JSON.stringify({ status: "chunk", content: chunkText })}\n\n`);
+                }
             });
 
             res.write(`data: ${JSON.stringify({ status: "done" })}\n\n`);

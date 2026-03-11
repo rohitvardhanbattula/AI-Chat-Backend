@@ -353,6 +353,43 @@ async function callSAPGenAIHub(prompt, systemInstruction, history = []) {
     } catch (err) { return { modelId: 'perplexity', content: "model is not available at the moment", latency: 0, error: true }; }
 }
 
+
+async function callClaude(prompt, systemInstruction, history = []) {
+    const start = Date.now();
+    try {
+        const dest = await getDestination({ destinationName: 'claude_api' });
+        const apikey = dest.originalProperties.apikey;
+        
+        const formattedHistory = history.map(m => ({
+            role: m.role,
+            content: m.content
+        }));
+        
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: "POST",
+            headers: {
+                "x-api-key": apikey,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            },
+            body: JSON.stringify({
+                model: "claude-sonnet-4-20250514",
+                max_tokens: 8000,
+                system: systemInstruction,
+                messages: [...formattedHistory, { role: 'user', content: prompt }]
+            })
+        });
+
+        if (!response.ok) {
+            const errData = await response.text();
+            throw new Error(errData);
+        }
+
+        const data = await response.json();
+        return { modelId: 'claude', content: data.content[0].text, latency: Date.now() - start };
+    } catch (err) { return { modelId: 'claude', content: "model is not available at the moment", latency: 0, error: true }; }
+}
+
 async function streamClaude(prompt, systemInstruction, history, onChunk) {
     const dest = await getDestination({ destinationName: 'claude_api' });
     const apikey = dest.originalProperties.apikey;
@@ -368,8 +405,10 @@ async function streamClaude(prompt, systemInstruction, history, onChunk) {
         },
         body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
+            stream: true,
             max_tokens: 4000, // Reduced slightly for better stability without beta headers
             system: systemInstruction,
+            stream: true,
             messages: [...formattedHistory, { role: 'user', content: prompt }],
             stream: true
         })
@@ -410,38 +449,3 @@ async function streamClaude(prompt, systemInstruction, history, onChunk) {
     return fullResponse;
 }
 
-async function callClaude(prompt, systemInstruction, history = []) {
-    const start = Date.now();
-    try {
-        const dest = await getDestination({ destinationName: 'claude_api' });
-        const apikey = dest.originalProperties.apikey;
-        
-        const formattedHistory = history.map(m => ({
-            role: m.role,
-            content: m.content
-        }));
-        
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: "POST",
-            headers: {
-                "x-api-key": apikey,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "claude-sonnet-4-20250514",
-                max_tokens: 8000,
-                system: systemInstruction,
-                messages: [...formattedHistory, { role: 'user', content: prompt }]
-            })
-        });
-
-        if (!response.ok) {
-            const errData = await response.text();
-            throw new Error(errData);
-        }
-
-        const data = await response.json();
-        return { modelId: 'claude', content: data.content[0].text, latency: Date.now() - start };
-    } catch (err) { return { modelId: 'claude', content: "model is not available at the moment", latency: 0, error: true }; }
-}
