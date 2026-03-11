@@ -12,7 +12,7 @@ async function validateAbapCode(abapCode) {
     const issues = registry.findIssues();
 
     const ignoredPhrases = [
-        "align ", "change if to case", "end of line comments", "name too long",
+        "align ", "change if to case", "end of line comments", "name too long","Remove double space","Implicit START-OF-SELECTION",
         "text element", "exit is not allowed", "specify table key", "functional writing style",
         "indentation", "does not match pattern", "main file must have specific contents",
         "only one statement is allowed", "hungarian notation", "is obsolete",
@@ -58,15 +58,20 @@ async function extractAndValidateABAP(text) {
 
     if (!containsAbap) return { report: "", count: 0, hasAbap: false };
 
+    // THIS IS THE CRITICAL FIX: The string must perfectly match what React is looking for
+    const topHeader = errorCount > 0 
+        ? `** abaplint: ${errorCount} high-risk issue(s) found**\n\n` 
+        : `** abaplint: 0 high-risk issues**\n\n`;
+
     if (allIssues.length > 0) {
         return {
-            report: "\n\n---\n** Abaplint Analysis:**\n" + allIssues.map(i => `- ${i}`).join('\n'),
+            report: "\n\n---\n" + topHeader + allIssues.map(i => `- ${i}`).join('\n'),
             count: errorCount,
             hasAbap: true
         };
     }
     return {
-        report: "\n\n---\n** abaplint Analysis:** No high-risk syntax issues found in the generated ABAP code.",
+        report: "\n\n---\n" + topHeader + "No high-risk syntax issues found in the generated ABAP code.",
         count: 0,
         hasAbap: true
     };

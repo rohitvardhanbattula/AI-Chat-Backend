@@ -22,6 +22,7 @@ cds.on('bootstrap', app => {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
 
         const { sessionId, modelId, prompt } = req.body;
@@ -46,6 +47,7 @@ cds.on('bootstrap', app => {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
 
         const { modelId, prompt } = req.body;
