@@ -183,7 +183,59 @@ module.exports = cds.service.impl(async function () {
             return { modelId: models[index] || "unknown", content: "model is not available at the moment", latency: 0, error: true };
         }));
     });
+    this.generateStreamNoSession = async function (modelId, prompt, onChunk) {
+        const normalizedModelId = modelId ? modelId.toLowerCase() : "";
+        const systemInstruction = "You are an expert SAP developer specializing in ABAP and SAP CAPM. Provide clean, optimized code. Always wrap your ABAP code in ```abap code blocks.";
+        const history = []; 
+        let fullResponse = "";
 
+        try {
+            if (normalizedModelId === 'gemini') {
+                const { VertexAI } = require('@google-cloud/vertexai');
+                const dest = await getDestination({ destinationName: 'geminivertex_api' });
+                const svcKey = dest.originalProperties;
+                const vertexAI = new VertexAI({ project: svcKey.project_id, location: 'us-central1', googleAuthOptions: { credentials: { client_email: svcKey.client_email, private_key: svcKey.private_key.replace(/\\n/g, '\n') } } });
+                const model = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction: { parts: [{ text: systemInstruction }] } });
+
+                const resultStream = await model.startChat({ history: [] }).sendMessageStream(prompt);
+                for await (const chunk of resultStream.stream) {
+                    const chunkText = chunk.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                    if (chunkText) {
+                        fullResponse += chunkText;
+                        onChunk(chunkText);
+                    }
+                }
+            } else if (normalizedModelId === 'claude') {
+                fullResponse = await streamClaude(prompt, systemInstruction, history, onChunk);
+            } else {
+                let res;
+                if (normalizedModelId === 'gpt4o') {
+                    res = await callGPT4o(prompt, systemInstruction, history);
+                } else {
+                    res = await callSAPGenAIHub(prompt, systemInstruction, history);
+                }
+
+                if (res.error || !res.content) {
+                    fullResponse = "model is not available at the moment";
+                    onChunk(fullResponse);
+                } else {
+                    fullResponse = res.content;
+                    onChunk(fullResponse);
+                }
+            }
+
+            if (fullResponse !== "model is not available at the moment") {
+                const validation = await extractAndValidateABAP(fullResponse);
+                if (validation.report) {
+                    fullResponse += validation.report;
+                    onChunk(validation.report);
+                }
+            }
+        } catch (error) { 
+            console.error("Comparison Stream Error:", error);
+            onChunk(`model is not available at the moment. Error: ${error.message || error}`);
+        }
+    };
     this.generateStream = async function (sessionId, modelId, prompt, onChunk) {
         
         const userMessageCount = await SELECT.from('sap.aigateway.ChatMessages').where({ session_ID: sessionId, role: 'user' });
@@ -219,12 +271,11 @@ module.exports = cds.service.impl(async function () {
                         onChunk(chunkText);
                     }
                 }
+            } else if (normalizedModelId === 'claude') {
+                fullResponse = await streamClaude(prompt, systemInstruction, history, onChunk);
             } else {
                 let res;
-                if (normalizedModelId === 'claude') {
-                    res = await callClaude(prompt, systemInstruction, history);
-                } else if (normalizedModelId === 'gpt4o') {
-                    
+                if (normalizedModelId === 'gpt4o') {
                     res = await callGPT4o(prompt, systemInstruction, history);
                 } else {
                     res = await callSAPGenAIHub(prompt, systemInstruction, history);
@@ -235,11 +286,7 @@ module.exports = cds.service.impl(async function () {
                     onChunk(fullResponse);
                 } else {
                     fullResponse = res.content;
-                    const chunkSize = 10;
-                    for (let i = 0; i < fullResponse.length; i += chunkSize) {
-                        onChunk(fullResponse.slice(i, i + chunkSize));
-                        await new Promise(r => setTimeout(r, 10));
-                    }
+                    onChunk(fullResponse);
                 }
             }
 
@@ -256,6 +303,7 @@ module.exports = cds.service.impl(async function () {
             });
 
         } catch (error) { 
+            console.error("AI Stream Error Details:", error);
             onChunk("model is not available at the moment");
             await INSERT.into('sap.aigateway.ChatMessages').entries({
                 session_ID: sessionId, role: 'assistant', content: "model is not available at the moment", modelId: modelId, latency: Date.now() - latencyStart
@@ -294,10 +342,67 @@ async function callSAPGenAIHub(prompt, systemInstruction, history = []) {
     try {
         const openai = await cds.connect.to("perplexity");
         const messages = [{ role: 'system', content: systemInstruction }, ...history, { role: 'user', content: prompt }];
-        const response = await openai.send({ query: "POST /chat/completions?api-version=2024-02-15-preview", data: { model: "sonar", max_tokens: 4000, temperature: 0.5, messages: messages }, headers: { "AI-Resource-Group": "default", "Content-Type": "application/json" } });
+        const response = await openai.send({ query: "POST /chat/completions?api-version=2024-02-15-preview", data: { model: "sonar", max_tokens: 2000, temperature: 0.5, messages: messages }, headers: { "AI-Resource-Group": "default", "Content-Type": "application/json" } });
         if (!response || !response.choices) throw new Error("AI response did not contain 'choices'.");
         return { modelId: 'perplexity', content: response.choices[0].message.content, latency: Date.now() - start };
     } catch (err) { return { modelId: 'perplexity', content: "model is not available at the moment", latency: 0, error: true }; }
+}
+
+async function streamClaude(prompt, systemInstruction, history, onChunk) {
+    const dest = await getDestination({ destinationName: 'claude_api' });
+    const apikey = dest.originalProperties.apikey;
+    
+    const formattedHistory = history.map(m => ({ role: m.role, content: m.content }));
+    
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: "POST",
+        headers: {
+            "x-api-key": apikey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        },
+        body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 4000, // Reduced slightly for better stability without beta headers
+            system: systemInstruction,
+            messages: [...formattedHistory, { role: 'user', content: prompt }],
+            stream: true
+        })
+    });
+
+    if (!response.ok) throw new Error(await response.text());
+
+    let fullResponse = "";
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = ""; // Add buffer for incomplete chunks
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        
+        // Pop the last element (it might be an incomplete line) back into the buffer
+        buffer = lines.pop() || "";
+        
+        for (let line of lines) {
+            line = line.trim();
+            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                try {
+                    const data = JSON.parse(line.slice(6));
+                    if (data.type === 'content_block_delta' && data.delta && data.delta.text) {
+                        fullResponse += data.delta.text;
+                        onChunk(data.delta.text);
+                    }
+                } catch (err) {
+                    console.error("Error parsing stream chunk:", err, "Line:", line);
+                }
+            }
+        }
+    }
+    return fullResponse;
 }
 
 async function callClaude(prompt, systemInstruction, history = []) {
