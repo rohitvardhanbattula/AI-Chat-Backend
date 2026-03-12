@@ -12,7 +12,7 @@ async function validateAbapCode(abapCode) {
     const issues = registry.findIssues();
 
     const ignoredPhrases = [
-        "align ", "change if to case", "end of line comments", "name too long","Remove double space","Implicit START-OF-SELECTION",
+        "align ", "change if to case", "end of line comments", "name too long","remove double space", "implicit start-of-selection",
         "text element", "exit is not allowed", "specify table key", "functional writing style",
         "indentation", "does not match pattern", "main file must have specific contents",
         "only one statement is allowed", "hungarian notation", "is obsolete",
