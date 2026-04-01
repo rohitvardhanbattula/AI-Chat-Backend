@@ -200,7 +200,7 @@ module.exports = cds.service.impl(async function () {
                 const dest = await getDestination({ destinationName: 'geminivertex_api' });
                 const svcKey = dest.originalProperties;
                 const vertexAI = new VertexAI({ project: svcKey.project_id, location: 'us-central1', googleAuthOptions: { credentials: { client_email: svcKey.client_email, private_key: svcKey.private_key.replace(/\\n/g, '\n') } } });
-                const model = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction: { parts: [{ text: systemInstruction }] } });
+                const model = vertexAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite', systemInstruction: { parts: [{ text: systemInstruction }] } });
 
                 const resultStream = await model.startChat({ history: [] }).sendMessageStream(prompt);
                 for await (const chunk of resultStream.stream) {
@@ -265,7 +265,7 @@ module.exports = cds.service.impl(async function () {
                 const dest = await getDestination({ destinationName: 'geminivertex_api' });
                 const svcKey = dest.originalProperties;
                 const vertexAI = new VertexAI({ project: svcKey.project_id, location: 'us-central1', googleAuthOptions: { credentials: { client_email: svcKey.client_email, private_key: svcKey.private_key.replace(/\\n/g, '\n') } } });
-                const model = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction: { parts: [{ text: systemInstruction }] } });
+                const model = vertexAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite', systemInstruction: { parts: [{ text: systemInstruction }] } });
                 const chatHistory = history.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
 
                 const resultStream = await model.startChat({ history: chatHistory }).sendMessageStream(prompt);
@@ -324,7 +324,7 @@ async function callGemini(prompt, systemInstruction, history = []) {
         const dest = await getDestination({ destinationName: 'geminivertex_api' });
         const svcKey = dest.originalProperties;
         const vertexAI = new VertexAI({ project: svcKey.project_id, location: 'us-central1', googleAuthOptions: { credentials: { client_email: svcKey.client_email, private_key: svcKey.private_key.replace(/\\n/g, '\n') } } });
-        const model = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction: { parts: [{ text: systemInstruction }] } });
+        const model = vertexAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite', systemInstruction: { parts: [{ text: systemInstruction }] } });
         const chatHistory = history.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
         const result = await model.startChat({ history: chatHistory }).sendMessage(prompt);
         return { modelId: 'gemini', content: result.response.candidates[0].content.parts[0].text, latency: Date.now() - start };
