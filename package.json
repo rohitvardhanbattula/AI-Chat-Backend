@@ -5,7 +5,7 @@
   "dependencies": {
     "@abaplint/core": "^2.115.28",
     "@cap-js/hana": "^2.6.0",
-    "@google-cloud/vertexai": "^1.10.0",
+    "@google/genai": "^2.2.0",
     "@google/generative-ai": "^0.24.1",
     "@sap-ai-sdk/orchestration": "^2.7.0",
     "@sap-cloud-sdk/connectivity": "^4.5.1",
@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@cap-js/sqlite": "^2",
-    "@sap/cds-dk": "^9"
+    "@sap/cds-dk": "^9.8.4"
   },
   "cds": {
     "server": {
@@ -51,7 +51,7 @@
         "kind": "rest",
         "credentials": {
           "destination": "GENERATIVE_AI_HUB",
-          "path": "/inference/deployments/d2c621b3fd067a5e"
+          "path": "/inference/deployments/de23d1f03a0db000"
         }
       }
     }
