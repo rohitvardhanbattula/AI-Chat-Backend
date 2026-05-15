@@ -636,7 +636,7 @@ async function callClaude(prompt, systemInstruction, history = []) {
             method: 'POST',
             headers: { 'x-api-key': apikey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
             // Aligned max_tokens with streamClaude (was 8000 vs 4000 — now both 8000)
-            body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 8000, system: systemInstruction, messages })
+            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8000, system: systemInstruction, messages })
         });
         console.log('Claude API response status:', response.status);
         if (!response.ok) {
@@ -660,7 +660,7 @@ async function streamClaude(prompt, systemInstruction, history, onChunk) {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apikey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', stream: true, max_tokens: 8000, system: systemInstruction, messages })
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', stream: true, max_tokens: 8000, system: systemInstruction, messages })
     });
     console.log('Claude Stream API response status:', response.status);
     if (!response.ok) {
