@@ -13,8 +13,8 @@ service AIService {
         error   : String;
     }
 
-    action generateMultiModelResponse(prompt: String) returns array of ModelResponse;
-    action sendChatMessage(sessionId: UUID, modelId: String, prompt: String) returns LargeString;
+    action generateMultiModelResponse(prompt: String, category: String, extractedText: LargeString) returns array of ModelResponse;
+    action sendChatMessage(sessionId: UUID, modelId: String, prompt: String, category: String, extractedText: LargeString) returns LargeString;
     action login(username: String, password: String) returns String;
     action register(username: String, password: String) returns String;
     action verifyOTP(username: String, otp: String) returns String;

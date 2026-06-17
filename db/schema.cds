@@ -14,6 +14,7 @@ entity ChatSessions : cuid, managed {
     userId        : String(100);
     title         : String(255);
     selectedModel : String(50);
+    functionalspec   : LargeString;
     messages      : Composition of many ChatMessages on messages.session = $self;
 }
 
