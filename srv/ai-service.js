@@ -668,7 +668,7 @@ async function callClaudeViaGenHub(prompt, history = [], functionalSpec = null) 
 
 async function callClaudeViaApiKey(prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null) {
     const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, sanitiseHistoryForClaude(history));
-    const dest     = await getCachedDestination('claude_api');     // ← cached
+    const dest     = await getDestination({ destinationName: 'claude_api' });
     const apikey   = dest.originalProperties.apikey;
     const messages = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
 
@@ -677,11 +677,12 @@ async function callClaudeViaApiKey(prompt, history = [], model = CLAUDE_MODEL_SI
         headers: {
             'x-api-key':         apikey,
             'anthropic-version': '2023-06-01',
+            'anthropic-beta':    'prompt-caching-2024-07-31', 
             'content-type':      'application/json'
         },
         body: JSON.stringify({
             model,
-            max_tokens: 5000,
+            max_tokens: 4096,
             system:     buildClaudeSystemBlocks(functionalSpec),
             messages
         })
@@ -697,7 +698,6 @@ async function callClaudeViaApiKey(prompt, history = [], model = CLAUDE_MODEL_SI
     if (!text) throw new Error('Empty response from Claude via API key');
     return text;
 }
-
 async function callClaude(prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null) {
     const start = Date.now();
     try {
@@ -721,29 +721,45 @@ async function callGPT4o(prompt, systemInstruction, history = []) {
     const start = Date.now();
     try {
         const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, history);
-        const openai   = await cds.connect.to('openai');
+
         const messages = [
             { role: 'system', content: systemInstruction },
             ...safeHistory,
             { role: 'user', content: safePrompt }
         ];
-        const response = await openai.send({
-            query:   'POST /chat/completions?api-version=2024-02-15-preview',
-            data:    { model: 'gpt-5.2', temperature: 0.5, messages },
-            headers: { 'AI-Resource-Group': 'default', 'Content-Type': 'application/json' }
-        });
-        console.log('GPT raw response shape:', JSON.stringify(Object.keys(response || {})));
-        if (!response?.choices) {
-            console.error('GPT unexpected response body:', JSON.stringify(response));
-            throw new Error('No choices in GPT response');
-        }
-        return { modelId: 'gpt4o', content: response.choices[0].message.content, latency: Date.now() - start };
-    } catch (err) {
-        console.error('callGPT4o error:', err?.message || err);
-        return { modelId: 'gpt4o', content: 'model is not available at the moment', latency: 0, error: true };
-    }
-}
 
+        const response = await executeHttpRequest(
+            { destinationName: 'GENERATIVE_AI_HUB' },
+            {
+                method:  'POST',
+                url:     '/inference/deployments/d905723f4f0b8b08/chat/completions?api-version=2024-02-15-preview',
+                headers: { 
+                    'Content-Type':      'application/json', 
+                    'AI-Resource-Group': 'default' 
+                },
+                data: { 
+                    model:       'gpt-5.2', 
+                    temperature: 0.5,
+                    messages 
+                }
+            },
+            { fetchCsrfToken: false }
+        );
+
+        const content = response.data?.choices?.[0]?.message?.content;
+        if (!content) throw new Error('No content in GPT response');
+
+        return { modelId: 'gpt4o', content, latency: Date.now() - start };
+
+    } catch (err) {
+    // Log the full response body from the API
+    if (err.response && err.response.data) {
+        console.error('API Error Details:', JSON.stringify(err.response.data, null, 2));
+    }
+    console.error('callGPT4o error:', err?.message || err);
+    return { modelId: 'gpt4o', content: 'model is not available at the moment', latency: 0, error: true };
+}
+}
 // ─── Perplexity / SAP GenAI Hub (Sonar) ──────────────────────────────────────
 async function callSAPGenAIHub(prompt, systemInstruction, history = []) {
     const start = Date.now();

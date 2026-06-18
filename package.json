@@ -41,21 +41,24 @@
         "credentials": {
           "destination": "GENERATIVE_AI_HUB",
           "path": "/inference/deployments/d740b392f05b27cf"
-        }
+        },
+        "timeout": 300000
       },
       "openai": {
         "kind": "rest",
         "credentials": {
           "destination": "GENERATIVE_AI_HUB",
           "path": "/inference/deployments/d905723f4f0b8b08"
-        }
+        },
+        "timeout": 300000
       },
       "perplexity": {
         "kind": "rest",
         "credentials": {
           "destination": "GENERATIVE_AI_HUB",
           "path": "/inference/deployments/de23d1f03a0db000"
-        }
+        },
+        "timeout": 300000
       }
     }
   },

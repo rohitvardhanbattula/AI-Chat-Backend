@@ -5,9 +5,9 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// Restrict file size to exactly 70 KB (70 * 1024 bytes)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 70 * 1024 } });
 
-// UPDATED: Now extracts unique PII items instead of forcefully masking them
 function extractPII(text) {
     const piiMap = new Map();
     
@@ -35,7 +35,25 @@ cds.on('bootstrap', app => {
         next();
     };
 
-    app.post('/odata/uploadDoc', upload.single('file'), async (req, res) => {
+    // NEW: Custom middleware to catch Multer errors before they crash Express
+    const uploadMiddleware = (req, res, next) => {
+        const singleUpload = upload.single('file');
+        singleUpload(req, res, (err) => {
+            if (err instanceof multer.MulterError) {
+                if (err.code === 'LIMIT_FILE_SIZE') {
+                    // Send a clean 400 response back to the client immediately
+                    return res.status(400).json({ error: 'File exceeds the maximum limit of 70KB.' });
+                }
+                return res.status(400).json({ error: `Upload error: ${err.message}` });
+            } else if (err) {
+                return res.status(500).json({ error: `Unknown upload error: ${err.message}` });
+            }
+            next(); // Proceed to the route handler if no error
+        });
+    };
+
+    // Use the uploadMiddleware instead of calling upload.single('file') directly
+    app.post('/odata/uploadDoc', uploadMiddleware, async (req, res) => {
         try {
             if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -53,7 +71,6 @@ cds.on('bootstrap', app => {
             
             extractedText = extractedText.replace(/[\x00-\x09\x0B-\x0C\x0E-\x1F\x7F]/g, '');
             
-            // Extract the PII list and return both the original text and the list
             const piiList = extractPII(extractedText);
 
             res.json({ text: extractedText, piiList });
