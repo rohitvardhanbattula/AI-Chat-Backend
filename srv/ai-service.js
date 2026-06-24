@@ -22,8 +22,10 @@ const MAX_PROMPTS_PER_SESSION = 20;
 const MAX_HISTORY_MESSAGES    = 6;
 const CHARS_PER_TOKEN         = 4;
 const MAX_INPUT_TOKENS        = 60_000;
-const HEARTBEAT_MS            = 15_000;
-
+const GPT_MAX_INPUT_TOKENS    = 10_000;  
+const CLAUDE_MAX_INPUT_TOKENS = 15_000;  // cap for Claude API key fallback
+const MAX_OUTPUT_TOKENS_GPT   = 4096;
+const MAX_OUTPUT_TOKENS_CLAUDE = 4096;
 const CLAUDE_MODEL_SIMPLE  = 'claude-sonnet-4-6';
 const CLAUDE_MODEL_COMPLEX = 'claude-opus-4-6';
 
@@ -492,7 +494,40 @@ function resolveClaudeModel(category) {
         ? CLAUDE_MODEL_COMPLEX
         : CLAUDE_MODEL_SIMPLE;
 }
+// ─── trimContext (updated — accepts per-model token limit) ────────────────────
+function trimContext(prompt, history, maxTokens = MAX_INPUT_TOKENS) {
+    let trimmed = history.slice(-MAX_HISTORY_MESSAGES);
 
+    const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
+    let historyTokens  = trimmed.reduce((acc, m) => {
+        const content = typeof m.content === 'string'
+            ? m.content
+            : JSON.stringify(m.content);
+        return acc + Math.ceil(content.length / CHARS_PER_TOKEN);
+    }, 0);
+
+    // Aggressively trim history until we fit within maxTokens
+    while (trimmed.length > 0 && (promptTokens + historyTokens) > maxTokens) {
+        const removed = trimmed.shift();
+        const removedContent = typeof removed.content === 'string'
+            ? removed.content
+            : JSON.stringify(removed.content);
+        historyTokens -= Math.ceil(removedContent.length / CHARS_PER_TOKEN);
+    }
+
+    // If the prompt itself exceeds the limit, hard-truncate it
+    let finalPrompt = prompt;
+    if (promptTokens > maxTokens) {
+        const maxChars = maxTokens * CHARS_PER_TOKEN;
+        finalPrompt    = prompt.slice(0, maxChars) + '\n\n[PROMPT TRUNCATED — PLEASE BREAK INTO SMALLER PARTS]';
+        console.warn(`trimContext: prompt truncated from ${prompt.length} to ${maxChars} chars (limit=${maxTokens} tokens)`);
+    }
+
+    const finalTokenEstimate = Math.ceil(finalPrompt.length / CHARS_PER_TOKEN) + historyTokens;
+    console.log(`trimContext: finalTokenEstimate=${finalTokenEstimate}, historyMsgs=${trimmed.length}, maxTokens=${maxTokens}`);
+
+    return { history: trimmed, prompt: finalPrompt };
+}
 function trimContext(prompt, history) {
     let trimmed = history.slice(-MAX_HISTORY_MESSAGES);
 
@@ -666,38 +701,60 @@ async function callClaudeViaGenHub(prompt, history = [], functionalSpec = null) 
     return text;
 }
 
+// ─── callClaudeViaApiKey (updated — cached destination, per-model token cap) ──
 async function callClaudeViaApiKey(prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null) {
-    const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, sanitiseHistoryForClaude(history));
-    const dest     = await getDestination({ destinationName: 'claude_api' });
-    const apikey   = dest.originalProperties.apikey;
-    const messages = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
+    // Use Claude-specific token cap (tighter than the global 60K for safety)
+    const { history: safeHistory, prompt: safePrompt } = trimContext(
+        prompt,
+        sanitiseHistoryForClaude(history),
+        CLAUDE_MAX_INPUT_TOKENS
+    );
+
+    // Use getCachedDestination instead of getDestination to avoid hammering BTP
+    const dest   = await getCachedDestination('claude_api');
+    const apikey = dest.originalProperties.apikey;
+
+    const messages = [
+        ...applyCacheBreakpoint(safeHistory),
+        { role: 'user', content: safePrompt }
+    ];
+
+    const systemBlocks = buildClaudeSystemBlocks(functionalSpec);
+
+    const totalChars = messages.reduce((acc, m) => {
+        const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        return acc + c.length;
+    }, 0);
+    console.log(`callClaudeViaApiKey: model=${model}, estimatedInputTokens=${Math.ceil(totalChars / CHARS_PER_TOKEN)}, messages=${messages.length}`);
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
         method:  'POST',
         headers: {
             'x-api-key':         apikey,
             'anthropic-version': '2023-06-01',
-            'anthropic-beta':    'prompt-caching-2024-07-31', 
+            'anthropic-beta':    'prompt-caching-2024-07-31',
             'content-type':      'application/json'
         },
         body: JSON.stringify({
             model,
-            max_tokens: 4096,
-            system:     buildClaudeSystemBlocks(functionalSpec),
+            max_tokens: MAX_OUTPUT_TOKENS_CLAUDE,
+            system:     systemBlocks,
             messages
         })
     });
 
     if (!response.ok) {
         const errBody = await response.text();
-        throw new Error(`Claude API key request failed with status ${response.status}: ${errBody}`);
+        console.error(`callClaudeViaApiKey: HTTP ${response.status} — ${errBody}`);
+        throw new Error(`Claude API key request failed: ${response.status} — ${errBody}`);
     }
 
     const data = await response.json();
-    const text = data.content[0].text;
+    const text = data?.content?.[0]?.text;
     if (!text) throw new Error('Empty response from Claude via API key');
     return text;
 }
+
 async function callClaude(prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null) {
     const start = Date.now();
     try {
@@ -716,11 +773,12 @@ async function callClaude(prompt, history = [], model = CLAUDE_MODEL_SIMPLE, fun
     }
 }
 
-// ─── GPT-4o ───────────────────────────────────────────────────────────────────
+// ─── callGPT4o (updated — per-model token cap, max_tokens, full error logging) ─
 async function callGPT4o(prompt, systemInstruction, history = []) {
     const start = Date.now();
     try {
-        const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, history);
+        // Use GPT-specific token cap to prevent 500s on large payloads
+        const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, history, GPT_MAX_INPUT_TOKENS);
 
         const messages = [
             { role: 'system', content: systemInstruction },
@@ -728,19 +786,23 @@ async function callGPT4o(prompt, systemInstruction, history = []) {
             { role: 'user', content: safePrompt }
         ];
 
+        const totalChars   = messages.reduce((acc, m) => acc + (m.content?.length || 0), 0);
+        const estTokens    = Math.ceil(totalChars / CHARS_PER_TOKEN);
+        console.log(`callGPT4o: estimated input tokens=${estTokens}, messages=${messages.length}`);
+
         const response = await executeHttpRequest(
             { destinationName: 'GENERATIVE_AI_HUB' },
             {
                 method:  'POST',
                 url:     '/inference/deployments/d905723f4f0b8b08/chat/completions?api-version=2024-02-15-preview',
-                headers: { 
-                    'Content-Type':      'application/json', 
-                    'AI-Resource-Group': 'default' 
+                headers: {
+                    'Content-Type':      'application/json',
+                    'AI-Resource-Group': 'default'
                 },
-                data: { 
-                    model:       'gpt-5.2', 
+                data: {
+                    model:      'gpt-5.2', // explicit output cap
                     temperature: 0.5,
-                    messages 
+                    messages
                 }
             },
             { fetchCsrfToken: false }
@@ -752,13 +814,17 @@ async function callGPT4o(prompt, systemInstruction, history = []) {
         return { modelId: 'gpt4o', content, latency: Date.now() - start };
 
     } catch (err) {
-    // Log the full response body from the API
-    if (err.response && err.response.data) {
-        console.error('API Error Details:', JSON.stringify(err.response.data, null, 2));
+        const status  = err.response?.status;
+        const errData = err.response?.data;
+        console.error(`callGPT4o error: HTTP ${status ?? 'unknown'}`,
+            errData ? JSON.stringify(errData, null, 2) : (err?.message || err));
+
+        if (status === 500) console.error('callGPT4o: 500 from GenAI Hub — check token count or deployment availability');
+        if (status === 400) console.error('callGPT4o: 400 Bad Request — likely malformed messages or exceeded context');
+        if (status === 413) console.error('callGPT4o: 413 Payload Too Large — trimContext ceiling needs lowering');
+
+        return { modelId: 'gpt4o', content: 'model is not available at the moment', latency: 0, error: true };
     }
-    console.error('callGPT4o error:', err?.message || err);
-    return { modelId: 'gpt4o', content: 'model is not available at the moment', latency: 0, error: true };
-}
 }
 // ─── Perplexity / SAP GenAI Hub (Sonar) ──────────────────────────────────────
 async function callSAPGenAIHub(prompt, systemInstruction, history = []) {

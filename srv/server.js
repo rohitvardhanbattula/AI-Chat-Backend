@@ -5,23 +5,23 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 
-// Restrict file size to exactly 70 KB (70 * 1024 bytes)
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 70 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// UPDATED: Now extracts unique PII items instead of forcefully masking them
 function extractPII(text) {
     const piiMap = new Map();
-    
+
     const emails = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
     const phones = text.match(/\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g) || [];
     const ccs = text.match(/\b(?:\d[ -]*?){13,16}\b/g) || [];
-    
+
     emails.forEach(e => piiMap.set(e, 'Email'));
     phones.forEach(p => piiMap.set(p, 'Phone'));
     ccs.forEach(c => piiMap.set(c, 'Card'));
-    
+
     const piiList = [];
     piiMap.forEach((type, value) => piiList.push({ type, value }));
-    
+
     return piiList;
 }
 
@@ -30,30 +30,13 @@ cds.on('bootstrap', app => {
     app.use(express.json({ limit: '20mb' }));
 
     const setStreamTimeout = (req, res, next) => {
+
         if (typeof req.setTimeout === 'function') req.setTimeout(600000);
         if (typeof res.setTimeout === 'function') res.setTimeout(600000);
         next();
     };
 
-    // NEW: Custom middleware to catch Multer errors before they crash Express
-    const uploadMiddleware = (req, res, next) => {
-        const singleUpload = upload.single('file');
-        singleUpload(req, res, (err) => {
-            if (err instanceof multer.MulterError) {
-                if (err.code === 'LIMIT_FILE_SIZE') {
-                    // Send a clean 400 response back to the client immediately
-                    return res.status(400).json({ error: 'File exceeds the maximum limit of 70KB.' });
-                }
-                return res.status(400).json({ error: `Upload error: ${err.message}` });
-            } else if (err) {
-                return res.status(500).json({ error: `Unknown upload error: ${err.message}` });
-            }
-            next(); // Proceed to the route handler if no error
-        });
-    };
-
-    // Use the uploadMiddleware instead of calling upload.single('file') directly
-    app.post('/odata/uploadDoc', uploadMiddleware, async (req, res) => {
+    app.post('/odata/uploadDoc', upload.single('file'), async (req, res) => {
         try {
             if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -68,9 +51,13 @@ cds.on('bootstrap', app => {
             } else {
                 return res.status(400).json({ error: 'Unsupported file format. Only PDF and DOCX are supported.' });
             }
-            
-            extractedText = extractedText.replace(/[\x00-\x09\x0B-\x0C\x0E-\x1F\x7F]/g, '');
-            
+
+            extractedText = extractedText
+                .replace(/\n{3,}/g, '\n\n')
+                .replace(/[ \t]+/g, ' ')
+                .trim();
+
+            // 3. Extract the PII list
             const piiList = extractPII(extractedText);
 
             res.json({ text: extractedText, piiList });
@@ -81,13 +68,13 @@ cds.on('bootstrap', app => {
     });
 
     app.use('/odata/streamChatMessage', setStreamTimeout);
-    app.use('/odata/streamComparison',  setStreamTimeout);
+    app.use('/odata/streamComparison', setStreamTimeout);
 
     app.post('/odata/streamChatMessage', async (req, res) => {
-        res.setHeader('Content-Type',     'text/event-stream');
-        res.setHeader('Cache-Control',    'no-cache, no-transform');
-        res.setHeader('Connection',       'keep-alive');
-        res.setHeader('X-Accel-Buffering','no');
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
 
         const { sessionId, modelId, prompt, category } = req.body;
@@ -111,10 +98,10 @@ cds.on('bootstrap', app => {
     });
 
     app.post('/odata/streamComparison', async (req, res) => {
-        res.setHeader('Content-Type',     'text/event-stream');
-        res.setHeader('Cache-Control',    'no-cache, no-transform');
-        res.setHeader('Connection',       'keep-alive');
-        res.setHeader('X-Accel-Buffering','no');
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
 
         const { modelId, prompt, category, extractedText } = req.body;
