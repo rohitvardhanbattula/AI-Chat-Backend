@@ -1,16 +1,12 @@
 'use strict';
 
 const cds = require('@sap/cds');
-const { getDestination } = require('@sap-cloud-sdk/connectivity');
+const { getDestination }    = require('@sap-cloud-sdk/connectivity');
 const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
 const { Registry, MemoryFile } = require('@abaplint/core');
 const { sendMail } = require('@sap-cloud-sdk/mail-client');
-const Agent = require("./agent/agent");
-const Memory = require("./agent/memory");
-const Formatter = require("./agent/formatter");
-let agent;
-const memory = new Memory();
-const formatter = new Formatter();
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 const GLOBAL_SYSTEM_INSTRUCTION =
     'You are an expert SAP developer specializing in ABAP. ' +
     'CRITICAL RULES: ' +
@@ -20,17 +16,17 @@ const GLOBAL_SYSTEM_INSTRUCTION =
     '4. NEVER simply delete requested functionality to avoid errors. You must provide the modern equivalent. ' +
     '5. NO PSEUDO-CODE. You must write executable, active ABAP code. Do NOT comment out the main business logic or use placeholder classes/strings. If you do not know the exact Tier 1 API, attempt to write the real code anyway.';
 
-const MAX_RETRIES = 2;
-const MAX_CHATS_PER_USER = 10;
+const MAX_RETRIES             = 2;
+const MAX_CHATS_PER_USER      = 10;
 const MAX_PROMPTS_PER_SESSION = 20;
-const MAX_HISTORY_MESSAGES = 6;
-const CHARS_PER_TOKEN = 4;
-const MAX_INPUT_TOKENS = 60_000;
-const GPT_MAX_INPUT_TOKENS = 10_000;
+const MAX_HISTORY_MESSAGES    = 6;
+const CHARS_PER_TOKEN         = 4;
+const MAX_INPUT_TOKENS        = 60_000;
+const GPT_MAX_INPUT_TOKENS    = 10_000;  
 const CLAUDE_MAX_INPUT_TOKENS = 15_000;  // cap for Claude API key fallback
-const MAX_OUTPUT_TOKENS_GPT = 4096;
+const MAX_OUTPUT_TOKENS_GPT   = 4096;
 const MAX_OUTPUT_TOKENS_CLAUDE = 4096;
-const CLAUDE_MODEL_SIMPLE = 'claude-sonnet-4-6';
+const CLAUDE_MODEL_SIMPLE  = 'claude-sonnet-4-6';
 const CLAUDE_MODEL_COMPLEX = 'claude-opus-4-6';
 
 const GENHUB_CLAUDE_DEPLOYMENT = 'dacd7fd5faf9cdb9';
@@ -50,7 +46,7 @@ const ABAP_IGNORE_PHRASES = [
     'specify table type', 'not found, findtop'
 ];
 
-const GITHUB_BASE = 'https://raw.githubusercontent.com/SAP/abap-atc-cr-cv-s4hc/main/src';
+const GITHUB_BASE         = 'https://raw.githubusercontent.com/SAP/abap-atc-cr-cv-s4hc/main/src';
 const SAP_RELEASE_VERSION = 'PCE2023_0';
 
 // ─── Cloudification cache with a lock flag ───────────────────────────────────
@@ -58,10 +54,10 @@ const SAP_RELEASE_VERSION = 'PCE2023_0';
 // with no guard against concurrent re-fetches (e.g. if the exported function
 // were called again). A simple flag prevents parallel in-flight requests from
 // hammering GitHub on restarts or hot-reloads.
-let cloudificationCache = [];
-let syncInProgress = false;
-let syncCompletedAt = null;          // allows future cache-refresh scheduling
-const SYNC_TTL_MS = 60 * 60 * 1000; // 1 h — refresh stale cache once per hour
+let cloudificationCache   = [];
+let syncInProgress        = false;
+let syncCompletedAt       = null;          // allows future cache-refresh scheduling
+const SYNC_TTL_MS         = 60 * 60 * 1000; // 1 h — refresh stale cache once per hour
 
 // ─── Fetch helper with timeout ───────────────────────────────────────────────
 // PERF FIX: The original fetchJSON had no timeout. A slow/stalled GitHub
@@ -101,13 +97,13 @@ async function syncCloudificationData() {
                 const name = item.objectKey?.toUpperCase() || item.tadirObjName?.toUpperCase();
                 if (!name) continue;
                 const successor = item.successors?.[0]?.tadirObjName?.toUpperCase() || null;
-                const state = item.state?.toLowerCase();
+                const state     = item.state?.toLowerCase();
                 entries.push({
                     object: name,
                     successor,
-                    type: item.objectType || item.tadirObject,
+                    type:  item.objectType || item.tadirObject,
                     state: state === 'deprecated' ? 'DEPRECATED' : 'RELEASED',
-                    tier: 1
+                    tier:  1
                 });
             } catch { /* ignore malformed rows */ }
         }
@@ -130,10 +126,10 @@ async function syncCloudificationData() {
 
                 const rawState = (item.state || '').toLowerCase().replace(/[\s_]/g, '');
                 let state = 'CLASSIC_API';
-                if (rawState === 'released') state = 'RELEASED';
-                else if (rawState === 'deprecated') state = 'DEPRECATED';
+                if      (rawState === 'released')       state = 'RELEASED';
+                else if (rawState === 'deprecated')      state = 'DEPRECATED';
                 else if (rawState === 'nottobereleased') state = 'NOT_TO_BE_RELEASED';
-                else if (rawState === 'classicapi') state = 'CLASSIC_API';
+                else if (rawState === 'classicapi')      state = 'CLASSIC_API';
 
                 const successor = item.successors?.[0]?.tadirObjName?.toUpperCase() || null;
                 entries.push({ object: name, successor, type: item.objectType || item.tadirObject, state, tier: 2 });
@@ -143,8 +139,8 @@ async function syncCloudificationData() {
     }
 
     cloudificationCache = entries;
-    syncCompletedAt = Date.now();
-    syncInProgress = false;
+    syncCompletedAt     = Date.now();
+    syncInProgress      = false;
     console.log(`syncCloudificationData: total cache size = ${cloudificationCache.length} entries`);
 }
 
@@ -170,43 +166,43 @@ syncCloudificationData().catch(err =>
 
 // ─── ABAP extraction ─────────────────────────────────────────────────────────
 const ABAP_OBJECT_TYPE_PATTERNS = [
-    { type: 'TYPE', regex: /\bTYPE\s+(?:TABLE OF\s+|STANDARD TABLE OF\s+|SORTED TABLE OF\s+|HASHED TABLE OF\s+)?([\/A-Za-z0-9_]+)/gi },
-    { type: 'FROM', regex: /\bFROM\s+([\/A-Za-z0-9_]+)/gi },
-    { type: 'JOIN', regex: /\bJOIN\s+([\/A-Za-z0-9_]+)/gi },
-    { type: 'INTO TABLE', regex: /\bINTO\s+(?:TABLE\s+)?@?([\/A-Za-z0-9_]+)/gi },
-    { type: 'REF TO', regex: /\bREF\s+TO\s+([\/A-Za-z0-9_]+)/gi },
-    { type: 'CALL FUNCTION', regex: /\bCALL\s+FUNCTION\s+'([\/A-Za-z0-9_]+)'/gi },
-    { type: 'CALL METHOD', regex: /\bCALL\s+METHOD\s+([\/A-Za-z0-9_]+)/gi },
-    { type: 'CLASS', regex: /\b((?:CL|IF|CX|BP|BL|CA|CB|CC|CD|CE|CF|CG|CH|CI|CJ|CK|CM|CN|CO|CP|CQ|CR|CS|CT|CU|CV|CW|CX|CY|CZ)_[A-Za-z0-9_\/]+)\b/gi },
-    { type: 'STATIC CALL', regex: /([\/A-Za-z0-9_]+)=>/gi },
-    { type: 'BAPI', regex: /\b(BAPI_[A-Za-z0-9_\/]+)\b/gi },
-    { type: 'INCLUDE', regex: /\bINCLUDE\s+([\/A-Za-z0-9_]+)/gi },
-    { type: 'TABLES', regex: /\bTABLES\s*:\s*([\/A-Za-z0-9_,\s]+)/gi },
-    { type: 'SELECT-OPTIONS', regex: /\bSELECT-OPTIONS\s+\w+\s+FOR\s+([\/A-Za-z0-9_]+)-/gi },
-    { type: 'PARAMETERS TYPE', regex: /\bPARAMETERS\s+\w+\s+TYPE\s+([\/A-Za-z0-9_]+)/gi },
-    { type: 'RANGES', regex: /\bRANGES\s+\w+\s+FOR\s+([\/A-Za-z0-9_]+)-/gi },
-    { type: 'AUTHORITY-CHECK', regex: /\bAUTHORITY-CHECK\s+OBJECT\s+'([\/A-Za-z0-9_]+)'/gi },
+    { type: 'TYPE',             regex: /\bTYPE\s+(?:TABLE OF\s+|STANDARD TABLE OF\s+|SORTED TABLE OF\s+|HASHED TABLE OF\s+)?([\/A-Za-z0-9_]+)/gi },
+    { type: 'FROM',             regex: /\bFROM\s+([\/A-Za-z0-9_]+)/gi },
+    { type: 'JOIN',             regex: /\bJOIN\s+([\/A-Za-z0-9_]+)/gi },
+    { type: 'INTO TABLE',       regex: /\bINTO\s+(?:TABLE\s+)?@?([\/A-Za-z0-9_]+)/gi },
+    { type: 'REF TO',           regex: /\bREF\s+TO\s+([\/A-Za-z0-9_]+)/gi },
+    { type: 'CALL FUNCTION',    regex: /\bCALL\s+FUNCTION\s+'([\/A-Za-z0-9_]+)'/gi },
+    { type: 'CALL METHOD',      regex: /\bCALL\s+METHOD\s+([\/A-Za-z0-9_]+)/gi },
+    { type: 'CLASS',            regex: /\b((?:CL|IF|CX|BP|BL|CA|CB|CC|CD|CE|CF|CG|CH|CI|CJ|CK|CM|CN|CO|CP|CQ|CR|CS|CT|CU|CV|CW|CX|CY|CZ)_[A-Za-z0-9_\/]+)\b/gi },
+    { type: 'STATIC CALL',      regex: /([\/A-Za-z0-9_]+)=>/gi },
+    { type: 'BAPI',             regex: /\b(BAPI_[A-Za-z0-9_\/]+)\b/gi },
+    { type: 'INCLUDE',          regex: /\bINCLUDE\s+([\/A-Za-z0-9_]+)/gi },
+    { type: 'TABLES',           regex: /\bTABLES\s*:\s*([\/A-Za-z0-9_,\s]+)/gi },
+    { type: 'SELECT-OPTIONS',   regex: /\bSELECT-OPTIONS\s+\w+\s+FOR\s+([\/A-Za-z0-9_]+)-/gi },
+    { type: 'PARAMETERS TYPE',  regex: /\bPARAMETERS\s+\w+\s+TYPE\s+([\/A-Za-z0-9_]+)/gi },
+    { type: 'RANGES',           regex: /\bRANGES\s+\w+\s+FOR\s+([\/A-Za-z0-9_]+)-/gi },
+    { type: 'AUTHORITY-CHECK',  regex: /\bAUTHORITY-CHECK\s+OBJECT\s+'([\/A-Za-z0-9_]+)'/gi },
     { type: 'CALL TRANSACTION', regex: /\bCALL\s+TRANSACTION\s+'([\/A-Za-z0-9_]+)'/gi },
-    { type: 'MESSAGE', regex: /\bMESSAGE\s+\w+\(\s*([\/A-Za-z0-9_]+)\s*\)/gi },
-    { type: 'ENHANCEMENT', regex: /\b((?:ES|BADI|BADI_DEF)_[A-Za-z0-9_\/]+)\b/gi },
-    { type: 'FUNCTION GROUP', regex: /\b((?:SAPL|FG_)[A-Za-z0-9_\/]+)\b/gi }
+    { type: 'MESSAGE',          regex: /\bMESSAGE\s+\w+\(\s*([\/A-Za-z0-9_]+)\s*\)/gi },
+    { type: 'ENHANCEMENT',      regex: /\b((?:ES|BADI|BADI_DEF)_[A-Za-z0-9_\/]+)\b/gi },
+    { type: 'FUNCTION GROUP',   regex: /\b((?:SAPL|FG_)[A-Za-z0-9_\/]+)\b/gi }
 ];
 
 const ABAP_PRIMITIVE_TYPES = new Set([
-    'STRING', 'XSTRING', 'INT1', 'INT2', 'INT4', 'INT8', 'FLOAT', 'DECFLOAT16', 'DECFLOAT34',
-    'NUMC', 'CHAR', 'DATS', 'TIMS', 'PACK', 'HEX', 'CLNT', 'LANG', 'UNIT', 'CUKY', 'CURR',
-    'DEC', 'FLTP', 'PREC', 'QUAN', 'SSTRING', 'RAWSTRING',
-    'I', 'D', 'T', 'F', 'C', 'N', 'X', 'P',
-    'TABLE', 'ANY', 'STANDARD', 'DATA', 'REF', 'TO', 'OF',
-    'ABAP_BOOL', 'ABAP_TRUE', 'ABAP_FALSE', 'SPACE', 'SY', 'SYST'
+    'STRING','XSTRING','INT1','INT2','INT4','INT8','FLOAT','DECFLOAT16','DECFLOAT34',
+    'NUMC','CHAR','DATS','TIMS','PACK','HEX','CLNT','LANG','UNIT','CUKY','CURR',
+    'DEC','FLTP','PREC','QUAN','SSTRING','RAWSTRING',
+    'I','D','T','F','C','N','X','P',
+    'TABLE','ANY','STANDARD','DATA','REF','TO','OF',
+    'ABAP_BOOL','ABAP_TRUE','ABAP_FALSE','SPACE','SY','SYST'
 ]);
 
 // Pre-compiled regex for the ABAP keyword blocklist used in extractAbapObjects.
 // PERF FIX: The original had a huge literal regex recreated on every filter()
 // call. Compiling it once at module load costs nothing extra at call time.
 const RE_ABAP_VAR_PREFIX = /^(LV_|LS_|LT_|GV_|GS_|GT_|IV_|IS_|IT_|EV_|ES_|ET_|CV_|CS_|CT_|RV_|RS_|RT_|MV_|MS_|MT_|WA_|ST_|P_|S_|LO_|MO_|AO_|GO_|IO_|EO_|RO_|CO_|TY_)/i;
-const RE_ABAP_KEYWORDS = /^(BEGIN|END|TYPES|DATA|FIELD|LINE|LOOP|SELECT|INSERT|UPDATE|DELETE|WHERE|INTO|FROM|AND|NOT|OR|IF|ELSE|ENDIF|ENDLOOP|EXIT|CONTINUE|RETURN|PERFORM|FORM|ENDFORM|WRITE|MESSAGE|APPEND|CLEAR|MOVE|ADD|SUBTRACT|MULTIPLY|DIVIDE|CONCATENATE|SPLIT|CONDENSE|TRANSLATE|SHIFT|REPLACE|SEARCH|MODIFY|COLLECT|SORT|READ|FIND|DESCRIBE|ASSIGN|CHECK|RAISE|CATCH|TRY|ENDTRY|RESUME|RETRY|CLEANUP|METHODS|INTERFACES|ALIASES|PROTECTED|PRIVATE|PUBLIC|CLASS|ENDCLASS|METHOD|ENDMETHOD|SECTION|IMPLEMENTATION|DEFINITION)$/i;
-const RE_DIGITS_ONLY = /^\d+$/;
+const RE_ABAP_KEYWORDS   = /^(BEGIN|END|TYPES|DATA|FIELD|LINE|LOOP|SELECT|INSERT|UPDATE|DELETE|WHERE|INTO|FROM|AND|NOT|OR|IF|ELSE|ENDIF|ENDLOOP|EXIT|CONTINUE|RETURN|PERFORM|FORM|ENDFORM|WRITE|MESSAGE|APPEND|CLEAR|MOVE|ADD|SUBTRACT|MULTIPLY|DIVIDE|CONCATENATE|SPLIT|CONDENSE|TRANSLATE|SHIFT|REPLACE|SEARCH|MODIFY|COLLECT|SORT|READ|FIND|DESCRIBE|ASSIGN|CHECK|RAISE|CATCH|TRY|ENDTRY|RESUME|RETRY|CLEANUP|METHODS|INTERFACES|ALIASES|PROTECTED|PRIVATE|PUBLIC|CLASS|ENDCLASS|METHOD|ENDMETHOD|SECTION|IMPLEMENTATION|DEFINITION)$/i;
+const RE_DIGITS_ONLY     = /^\d+$/;
 
 function stripAbapComments(code) {
     // PERF FIX: Original joined/split lines but otherwise did the same work.
@@ -218,7 +214,7 @@ function stripAbapComments(code) {
             if (trimmed.startsWith('*')) return '';
             let inString = false;
             for (let i = 0; i < line.length; i++) {
-                if (line[i] === "'") { inString = !inString; }
+                if      (line[i] === "'")              { inString = !inString; }
                 else if (line[i] === '"' && !inString) { return line.slice(0, i); }
             }
             return line;
@@ -228,7 +224,7 @@ function stripAbapComments(code) {
 
 function extractAbapObjects(abapCode) {
     const cleanCode = stripAbapComments(abapCode);
-    const objects = new Set();
+    const objects   = new Set();
 
     for (const { type, regex } of ABAP_OBJECT_TYPE_PATTERNS) {
         regex.lastIndex = 0;
@@ -246,8 +242,8 @@ function extractAbapObjects(abapCode) {
         const upper = obj.toUpperCase();
         return (
             !ABAP_PRIMITIVE_TYPES.has(upper) &&
-            obj.length > 4 &&
-            !RE_DIGITS_ONLY.test(obj) &&
+            obj.length > 4               &&
+            !RE_DIGITS_ONLY.test(obj)    &&
             !RE_ABAP_VAR_PREFIX.test(obj) &&
             !RE_ABAP_KEYWORDS.test(obj)
         );
@@ -255,16 +251,16 @@ function extractAbapObjects(abapCode) {
 }
 
 const SAP_ALWAYS_VALID_OBJECTS = new Set([
-    'BAPI_TRANSACTION_COMMIT', 'BAPI_TRANSACTION_ROLLBACK',
-    'BAPIRET2', 'BAPIRET1', 'BAPIPAREX', 'BAPIPARAM', 'BAPILOGDET',
-    'BAPI_RETURN', 'BAPIMSGKY', 'BAPIADDR1', 'BAPIADDR2',
-    'LIKP', 'LIPS', 'MARA', 'MARC', 'MARD', 'MCHB', 'MKPF', 'MSEG',
-    'VBAK', 'VBAP', 'VBEP', 'VBFA', 'VBKD', 'VBPA', 'VBUK', 'VBUP',
-    'KNA1', 'KNB1', 'LFA1', 'LFB1', 'EKKO', 'EKPO', 'EKET',
-    'T001', 'T001W', 'T006', 'T006A', 'TCURR', 'TCURF',
-    'AUFK', 'AUFP', 'CRHD', 'CRCO',
-    'ABAP_BOOL', 'ABAP_TRUE', 'ABAP_FALSE', 'ABAP_ENCODING',
-    'SY', 'SYST', 'SPACE'
+    'BAPI_TRANSACTION_COMMIT','BAPI_TRANSACTION_ROLLBACK',
+    'BAPIRET2','BAPIRET1','BAPIPAREX','BAPIPARAM','BAPILOGDET',
+    'BAPI_RETURN','BAPIMSGKY','BAPIADDR1','BAPIADDR2',
+    'LIKP','LIPS','MARA','MARC','MARD','MCHB','MKPF','MSEG',
+    'VBAK','VBAP','VBEP','VBFA','VBKD','VBPA','VBUK','VBUP',
+    'KNA1','KNB1','LFA1','LFB1','EKKO','EKPO','EKET',
+    'T001','T001W','T006','T006A','TCURR','TCURF',
+    'AUFK','AUFP','CRHD','CRCO',
+    'ABAP_BOOL','ABAP_TRUE','ABAP_FALSE','ABAP_ENCODING',
+    'SY','SYST','SPACE'
 ]);
 
 // ─── Cache lookup Map ────────────────────────────────────────────────────────
@@ -273,11 +269,11 @@ const SAP_ALWAYS_VALID_OBJECTS = new Set([
 // validation call. With a large SAP object catalogue this is O(n) per lookup.
 // We build a Map<objectName, entry> after each sync for O(1) access.
 // The successors Set lets us efficiently answer "is this name a successor?" too.
-let cacheByName = new Map();   // objectName → cache entry
-let successorNames = new Set();   // all known successor object names
+let cacheByName      = new Map();   // objectName → cache entry
+let successorNames   = new Set();   // all known successor object names
 
 function rebuildCacheLookups() {
-    cacheByName = new Map(cloudificationCache.map(e => [e.object, e]));
+    cacheByName    = new Map(cloudificationCache.map(e => [e.object, e]));
     successorNames = new Set(
         cloudificationCache.flatMap(e => e.successor ? [e.successor] : [])
     );
@@ -312,27 +308,27 @@ function checkDeprecation(obj) {
     if (!entry) return { status: 'unknown' };
 
     switch (entry.state) {
-        case 'RELEASED': return { status: 'valid' };
-        case 'DEPRECATED': return entry.successor
+        case 'RELEASED':    return { status: 'valid' };
+        case 'DEPRECATED':  return entry.successor
             ? { status: 'deprecated', successor: entry.successor }
             : { status: 'valid' };
         case 'NOT_TO_BE_RELEASED': return entry.successor
             ? { status: 'deprecated', successor: entry.successor }
             : { status: 'not_to_be_released' };
         case 'CLASSIC_API': return { status: 'classic_api' };
-        default: return { status: 'unknown' };
+        default:            return { status: 'unknown' };
     }
 }
 
 function validateObjects(abapCode) {
-    const foundObjects = extractAbapObjects(abapCode);
+    const foundObjects   = extractAbapObjects(abapCode);
     const objectsToCheck = foundObjects.filter(
         obj => !SAP_ALWAYS_VALID_OBJECTS.has(obj) && !/^[YZ]/i.test(obj)
     );
 
-    const errors = [];
+    const errors            = [];
     const deprecatedObjects = [];
-    const invalidObjects = [];
+    const invalidObjects    = [];
 
     for (const obj of objectsToCheck) {
         const dep = checkDeprecation(obj);
@@ -366,7 +362,7 @@ function validateObjects(abapCode) {
 // with a cached array (unchanged — already module-level).
 async function validateAbapSyntax(abapCode) {
     const registry = new Registry();
-    const file = new MemoryFile('z_generated_code.prog.abap', abapCode);
+    const file     = new MemoryFile('z_generated_code.prog.abap', abapCode);
     registry.addFile(file);
     await registry.parseAsync();
 
@@ -374,7 +370,7 @@ async function validateAbapSyntax(abapCode) {
     return registry.findIssues()
         .filter(issue => {
             const severity = issue.getSeverity();
-            const isHigh = severity === 1 || severity === 2 || severity === 'Error';
+            const isHigh   = severity === 1 || severity === 2 || severity === 'Error';
             if (!isHigh) return false;
             const msg = lowerMsg(issue.getMessage());
             return !ABAP_IGNORE_PHRASES.some(phrase => msg.includes(phrase));
@@ -386,15 +382,15 @@ async function validateAbapSyntax(abapCode) {
 // PERF FIX: The original performValidation() created the abapRegex inside the
 // function, meaning it was re-compiled on every call. Hoisting it to module
 // scope compiles it exactly once.
-const RE_ABAP_BLOCK = /```(?:abap|ABAP|sql)?\s*\n([\s\S]*?)```/g;
+const RE_ABAP_BLOCK    = /```(?:abap|ABAP|sql)?\s*\n([\s\S]*?)```/g;
 const RE_ABAP_KEYWORDS_QUICK = /DATA:|SELECT |CLASS /;
 
 function performValidation(text) {
     RE_ABAP_BLOCK.lastIndex = 0;
     let match;
-    const repoErrors = [];
+    const repoErrors     = [];
     const invalidObjects = [];
-    const codeBlocks = [];
+    const codeBlocks     = [];
 
     while ((match = RE_ABAP_BLOCK.exec(text)) !== null) codeBlocks.push(match[1]);
 
@@ -412,28 +408,28 @@ function performValidation(text) {
 
     console.log(`performValidation: containsAbap=${containsAbap}, errors=${repoErrors.length}`);
     return {
-        hasAbap: containsAbap,
-        isInvalid: repoErrors.length > 0,
+        hasAbap:          containsAbap,
+        isInvalid:        repoErrors.length > 0,
         invalidObjects,
         internalFeedback: buildFeedbackMessage({ repoErrors })
     };
 }
 
 function buildFeedbackMessage({ repoErrors }) {
-    const sections = [];
-    const deprecated = repoErrors.filter(e => e.type === 'deprecated');
-    const classicApi = repoErrors.filter(e => e.type === 'classic_api');
+    const sections    = [];
+    const deprecated  = repoErrors.filter(e => e.type === 'deprecated');
+    const classicApi  = repoErrors.filter(e => e.type === 'classic_api');
     const notReleased = repoErrors.filter(e => e.type === 'not_to_be_released');
 
-    if (deprecated.length) sections.push('### Deprecated Objects (Must Replace with Successor)\n' + deprecated.map(e => `- ${e.message}`).join('\n'));
-    if (classicApi.length) sections.push('### Classic API Objects (Tier 2 Only — Not Allowed in ABAP Cloud)\n' + classicApi.map(e => `- ${e.message}`).join('\n'));
+    if (deprecated.length)  sections.push('### Deprecated Objects (Must Replace with Successor)\n'                    + deprecated.map(e  => `- ${e.message}`).join('\n'));
+    if (classicApi.length)  sections.push('### Classic API Objects (Tier 2 Only — Not Allowed in ABAP Cloud)\n'       + classicApi.map(e  => `- ${e.message}`).join('\n'));
     if (notReleased.length) sections.push('### Not To Be Released Objects (Blocked — Must Find Tier 1 Alternative)\n' + notReleased.map(e => `- ${e.message}`).join('\n'));
 
     return sections.join('\n\n');
 }
 
 function buildRetryPrompt(feedback, invalidObjects, attempt) {
-    const toReplace = invalidObjects.filter(obj => obj.successor);
+    const toReplace     = invalidObjects.filter(obj => obj.successor);
     const classicOrNTBR = invalidObjects.filter(obj => !obj.successor && (obj.reason === 'classic_api' || obj.reason === 'not_to_be_released'));
 
     const replacementLines = toReplace.map(
@@ -450,8 +446,8 @@ function buildRetryPrompt(feedback, invalidObjects, attempt) {
         '',
         '### Errors to Fix',
         feedback,
-        replacementLines.length ? '\n### Required Replacements (Deprecated → Successor)\n' + replacementLines.join('\n') : '',
-        classicLines.length ? '\n### Classic API / Not To Be Released — Must Use Tier 1 Alternatives\n' + classicLines.join('\n') : ''
+        replacementLines.length ? '\n### Required Replacements (Deprecated → Successor)\n'                  + replacementLines.join('\n') : '',
+        classicLines.length     ? '\n### Classic API / Not To Be Released — Must Use Tier 1 Alternatives\n' + classicLines.join('\n')     : ''
     ].filter(Boolean).join('\n');
 }
 
@@ -485,8 +481,8 @@ function buildClaudeSystemBlocks(functionalSpec) {
     const blocks = [{ type: 'text', text: GLOBAL_SYSTEM_INSTRUCTION, cache_control: { type: 'ephemeral' } }];
     if (functionalSpec) {
         blocks.push({
-            type: 'text',
-            text: `Functional Specification Context:\n${truncateSpec(functionalSpec, 2000)}`,
+            type:          'text',
+            text:          `Functional Specification Context:\n${truncateSpec(functionalSpec, 2000)}`,
             cache_control: { type: 'ephemeral' }
         });
     }
@@ -503,7 +499,7 @@ function trimContext(prompt, history, maxTokens = MAX_INPUT_TOKENS) {
     let trimmed = history.slice(-MAX_HISTORY_MESSAGES);
 
     const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
-    let historyTokens = trimmed.reduce((acc, m) => {
+    let historyTokens  = trimmed.reduce((acc, m) => {
         const content = typeof m.content === 'string'
             ? m.content
             : JSON.stringify(m.content);
@@ -523,7 +519,7 @@ function trimContext(prompt, history, maxTokens = MAX_INPUT_TOKENS) {
     let finalPrompt = prompt;
     if (promptTokens > maxTokens) {
         const maxChars = maxTokens * CHARS_PER_TOKEN;
-        finalPrompt = prompt.slice(0, maxChars) + '\n\n[PROMPT TRUNCATED — PLEASE BREAK INTO SMALLER PARTS]';
+        finalPrompt    = prompt.slice(0, maxChars) + '\n\n[PROMPT TRUNCATED — PLEASE BREAK INTO SMALLER PARTS]';
         console.warn(`trimContext: prompt truncated from ${prompt.length} to ${maxChars} chars (limit=${maxTokens} tokens)`);
     }
 
@@ -536,7 +532,7 @@ function trimContext(prompt, history) {
     let trimmed = history.slice(-MAX_HISTORY_MESSAGES);
 
     const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
-    let historyTokens = trimmed.reduce((acc, m) => acc + Math.ceil(m.content.length / CHARS_PER_TOKEN), 0);
+    let historyTokens  = trimmed.reduce((acc, m) => acc + Math.ceil(m.content.length / CHARS_PER_TOKEN), 0);
 
     while (trimmed.length > 0 && promptTokens + historyTokens > MAX_INPUT_TOKENS) {
         historyTokens -= Math.ceil(trimmed.shift().content.length / CHARS_PER_TOKEN);
@@ -545,7 +541,7 @@ function trimContext(prompt, history) {
     let finalPrompt = prompt;
     if (promptTokens > MAX_INPUT_TOKENS) {
         const maxChars = MAX_INPUT_TOKENS * CHARS_PER_TOKEN;
-        finalPrompt = prompt.slice(0, maxChars) + '\n\n[PROMPT TRUNCATED — PLEASE BREAK INTO SMALLER PARTS]';
+        finalPrompt    = prompt.slice(0, maxChars) + '\n\n[PROMPT TRUNCATED — PLEASE BREAK INTO SMALLER PARTS]';
         console.warn(`trimContext: prompt truncated from ${prompt.length} to ${maxChars} chars`);
     }
 
@@ -557,11 +553,11 @@ function trimContext(prompt, history) {
 // service on every invocation. Caching the resolved destination for a short TTL
 // (5 min) avoids hammering the destination service on every AI request while
 // still picking up credential rotations within a reasonable window.
-const DEST_CACHE = new Map();   // destinationName → { dest, expiresAt }
-const DEST_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const DEST_CACHE      = new Map();   // destinationName → { dest, expiresAt }
+const DEST_CACHE_TTL  = 5 * 60 * 1000; // 5 minutes
 
 async function getCachedDestination(name) {
-    const now = Date.now();
+    const now    = Date.now();
     const cached = DEST_CACHE.get(name);
     if (cached && cached.expiresAt > now) return cached.dest;
 
@@ -576,7 +572,7 @@ async function callGeminiViaGenHub(prompt, systemInstruction, history = []) {
 
     const contents = [
         ...safeHistory.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
+            role:  m.role === 'assistant' ? 'model' : 'user',
             parts: [{ text: m.content }]
         })),
         { role: 'user', parts: [{ text: safePrompt }] }
@@ -585,8 +581,8 @@ async function callGeminiViaGenHub(prompt, systemInstruction, history = []) {
     const response = await executeHttpRequest(
         { destinationName: 'GENERATIVE_AI_HUB' },
         {
-            method: 'POST',
-            url: `/inference/deployments/${GENHUB_GEMINI_DEPLOYMENT}/models/gemini-2.5-pro:generateContent`,
+            method:  'POST',
+            url:     `/inference/deployments/${GENHUB_GEMINI_DEPLOYMENT}/models/gemini-2.5-pro:generateContent`,
             headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
             data: {
                 system_instruction: { parts: [{ text: systemInstruction }] },
@@ -610,7 +606,7 @@ async function callGeminiViaVertexAI(prompt, systemInstruction, history = []) {
 
     const ai = new GoogleGenAI({
         vertexai: true,
-        project: project_id,
+        project:  project_id,
         location: 'us-central1',
         googleAuthOptions: {
             credentials: {
@@ -622,14 +618,14 @@ async function callGeminiViaVertexAI(prompt, systemInstruction, history = []) {
 
     const contents = [
         ...safeHistory.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
+            role:  m.role === 'assistant' ? 'model' : 'user',
             parts: [{ text: m.content }]
         })),
         { role: 'user', parts: [{ text: safePrompt }] }
     ];
 
     const result = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model:             'gemini-2.5-flash',
         systemInstruction: { parts: [{ text: systemInstruction }] },
         contents
     });
@@ -687,13 +683,13 @@ async function callClaudeViaGenHub(prompt, history = [], functionalSpec = null) 
     const response = await executeHttpRequest(
         { destinationName: 'GENERATIVE_AI_HUB' },
         {
-            method: 'POST',
-            url: `/inference/deployments/${GENHUB_CLAUDE_DEPLOYMENT}/invoke`,
+            method:  'POST',
+            url:     `/inference/deployments/${GENHUB_CLAUDE_DEPLOYMENT}/invoke`,
             headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
             data: {
                 anthropic_version: 'bedrock-2023-05-31',
-                system: systemText,
-                max_tokens: 5000,
+                system:            systemText,
+                max_tokens:        5000,
                 messages
             }
         },
@@ -715,7 +711,7 @@ async function callClaudeViaApiKey(prompt, history = [], model = CLAUDE_MODEL_SI
     );
 
     // Use getCachedDestination instead of getDestination to avoid hammering BTP
-    const dest = await getCachedDestination('claude_api');
+    const dest   = await getCachedDestination('claude_api');
     const apikey = dest.originalProperties.apikey;
 
     const messages = [
@@ -732,17 +728,17 @@ async function callClaudeViaApiKey(prompt, history = [], model = CLAUDE_MODEL_SI
     console.log(`callClaudeViaApiKey: model=${model}, estimatedInputTokens=${Math.ceil(totalChars / CHARS_PER_TOKEN)}, messages=${messages.length}`);
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
+        method:  'POST',
         headers: {
-            'x-api-key': apikey,
+            'x-api-key':         apikey,
             'anthropic-version': '2023-06-01',
-            'anthropic-beta': 'prompt-caching-2024-07-31',
-            'content-type': 'application/json'
+            'anthropic-beta':    'prompt-caching-2024-07-31',
+            'content-type':      'application/json'
         },
         body: JSON.stringify({
             model,
             max_tokens: MAX_OUTPUT_TOKENS_CLAUDE,
-            system: systemBlocks,
+            system:     systemBlocks,
             messages
         })
     });
@@ -790,21 +786,21 @@ async function callGPT4o(prompt, systemInstruction, history = []) {
             { role: 'user', content: safePrompt }
         ];
 
-        const totalChars = messages.reduce((acc, m) => acc + (m.content?.length || 0), 0);
-        const estTokens = Math.ceil(totalChars / CHARS_PER_TOKEN);
+        const totalChars   = messages.reduce((acc, m) => acc + (m.content?.length || 0), 0);
+        const estTokens    = Math.ceil(totalChars / CHARS_PER_TOKEN);
         console.log(`callGPT4o: estimated input tokens=${estTokens}, messages=${messages.length}`);
 
         const response = await executeHttpRequest(
             { destinationName: 'GENERATIVE_AI_HUB' },
             {
-                method: 'POST',
-                url: '/inference/deployments/d905723f4f0b8b08/chat/completions?api-version=2024-02-15-preview',
+                method:  'POST',
+                url:     '/inference/deployments/d905723f4f0b8b08/chat/completions?api-version=2024-02-15-preview',
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Content-Type':      'application/json',
                     'AI-Resource-Group': 'default'
                 },
                 data: {
-                    model: 'gpt-5.2', // explicit output cap
+                    model:      'gpt-5.2', // explicit output cap
                     temperature: 0.5,
                     messages
                 }
@@ -818,7 +814,7 @@ async function callGPT4o(prompt, systemInstruction, history = []) {
         return { modelId: 'gpt4o', content, latency: Date.now() - start };
 
     } catch (err) {
-        const status = err.response?.status;
+        const status  = err.response?.status;
         const errData = err.response?.data;
         console.error(`callGPT4o error: HTTP ${status ?? 'unknown'}`,
             errData ? JSON.stringify(errData, null, 2) : (err?.message || err));
@@ -834,11 +830,11 @@ async function callGPT4o(prompt, systemInstruction, history = []) {
 async function callSAPGenAIHub(prompt, systemInstruction, history = []) {
     const start = Date.now();
     try {
-        const openai = await cds.connect.to('perplexity');
+        const openai   = await cds.connect.to('perplexity');
         const messages = [{ role: 'system', content: systemInstruction }, ...history, { role: 'user', content: prompt }];
         const response = await openai.send({
-            query: 'POST /chat/completions?api-version=2024-02-15-preview',
-            data: { model: 'sonar', max_tokens: 2000, temperature: 0.5, messages },
+            query:   'POST /chat/completions?api-version=2024-02-15-preview',
+            data:    { model: 'sonar', max_tokens: 2000, temperature: 0.5, messages },
             headers: { 'AI-Resource-Group': 'default', 'Content-Type': 'application/json' }
         });
         if (!response?.choices) throw new Error('No choices in Perplexity response');
@@ -854,10 +850,10 @@ const MODEL_IDS = ['gemini', 'gpt4o', 'perplexity', 'claude'];
 
 async function generateWithValidation(modelId, prompt, history, category, functionalSpec) {
     const normalizedModelId = (modelId || '').toLowerCase();
-    const claudeModel = resolveClaudeModel(category);
-    let attempt = 0;
-    let currentPrompt = normalizedModelId === 'claude' ? prompt : buildPromptWithContext(prompt, functionalSpec);
-    let internalHistory = [...history];
+    const claudeModel       = resolveClaudeModel(category);
+    let attempt             = 0;
+    let currentPrompt       = normalizedModelId === 'claude' ? prompt : buildPromptWithContext(prompt, functionalSpec);
+    let internalHistory     = [...history];
 
     console.log(`generateWithValidation: start modelId=${normalizedModelId}, claudeModel=${claudeModel}, cacheSize=${cloudificationCache.length}`);
 
@@ -902,7 +898,7 @@ async function generateWithValidation(modelId, prompt, history, category, functi
         if (!validation.hasAbap) {
             console.log(`generateWithValidation: no abap block found on attempt ${attempt + 1}`);
             if (attempt < MAX_RETRIES - 1) {
-                internalHistory.push({ role: 'user', content: currentPrompt });
+                internalHistory.push({ role: 'user',      content: currentPrompt });
                 internalHistory.push({ role: 'assistant', content: generatedText });
                 currentPrompt = 'You did not wrap your code in ```abap blocks. Your response must start with ```abap and end with ```. Please provide the ABAP code again, correctly wrapped.';
                 attempt++;
@@ -919,7 +915,7 @@ async function generateWithValidation(modelId, prompt, history, category, functi
         console.log(`generateWithValidation: validation failed on attempt ${attempt + 1}, sending errors back to AI to fix`);
 
         if (attempt < MAX_RETRIES - 1) {
-            internalHistory.push({ role: 'user', content: currentPrompt });
+            internalHistory.push({ role: 'user',      content: currentPrompt });
             internalHistory.push({ role: 'assistant', content: generatedText });
             currentPrompt = buildRetryPrompt(validation.internalFeedback, validation.invalidObjects, attempt + 1);
             attempt++;
@@ -932,186 +928,10 @@ async function generateWithValidation(modelId, prompt, history, category, functi
 
     return 'model is not available at the moment';
 }
-const sapSessions = new Map();
+
 // ─── CDS Service ──────────────────────────────────────────────────────────────
 module.exports = cds.service.impl(async function () {
-    agent = new Agent({
 
-    sapUrl: process.env.SAP_URL,
-
-    sapUser: process.env.SAP_USER,
-
-    sapPassword: process.env.SAP_PASSWORD,
-
-    sapClient: process.env.SAP_CLIENT,
-
-    sapLanguage: process.env.SAP_LANGUAGE
-
-});
-
-await agent.initialize();
-    const McpClient = require("./mcp-client");
-    this.on(
-  "createSapSession",
-  async req => {
-
-    const {
-      sessionId,
-      sapUrl,
-      sapUser,
-      sapPassword,
-      sapClient,
-      sapLanguage
-    } = req.data;
-
-    const client =
-      new McpClient({
-        sapUrl,
-        sapUser,
-        sapPassword,
-        sapClient,
-        sapLanguage
-      });
-
-    const tools =
-      await client.listTools();
-
-    sapSessions.set(
-      sessionId,
-      {
-        client,
-        tools
-      }
-    );
-
-    return "SUCCESS";
-  }
-);
-
-this.on(
-  "testMcp",
-  async req => {
-
-    const {
-      sessionId,
-      toolName,
-      payload
-    } = req.data;
-
-    const session =
-      sapSessions.get(sessionId);
-
-    if (!session) {
-      throw new Error(
-        "SAP session not found"
-      );
-    }
-
-    const args =
-      payload
-        ? JSON.parse(payload)
-        : {};
-
-    const result =
-      await session.client.callTool(
-        toolName,
-        args
-      );
-
-    return JSON.stringify(
-      result,
-      null,
-      2
-    );
-  }
-);
-
-
-this.on(
-  "sendAbapAgentMessage",
-  async req => {
-
-    const {
-      sessionId,
-      prompt
-    } = req.data;
-
-    const session =
-      sapSessions.get(sessionId);
-
-    if (!session) {
-      throw new Error(
-        "SAP session not found"
-      );
-    }
-
-    const lower =
-      prompt.toLowerCase();
-
-    if (
-      lower.includes("source") ||
-      lower.includes("code")
-    ) {
-
-      const match =
-        prompt.match(
-          /Z[A-Z0-9_]+/i
-        );
-
-      if (!match) {
-        return "ABAP object name not found";
-      }
-
-      const objectName =
-        match[0];
-
-      const result =
-        await session.client.callTool(
-          "getObjectSource",
-          {
-            objectName
-          }
-        );
-
-      return JSON.stringify(
-        result,
-        null,
-        2
-      );
-    }
-
-    if (
-      lower.includes("search")
-    ) {
-
-      const result =
-        await session.client.callTool(
-          "searchObject",
-          {
-            query: prompt
-          }
-        );
-
-      return JSON.stringify(
-        result,
-        null,
-        2
-      );
-    }
-
-    return `
-Agent connected.
-
-Try:
-
-Search class ZCL_TEST
-
-Show source code of class ZCL_TEST
-
-Run syntax check on class ZCL_TEST
-`;
-  }
-);
     this.before('CREATE', 'ChatSessions', async (req) => {
         const { userId } = req.data;
         if (!userId) return;
@@ -1141,7 +961,7 @@ Run syntax check on class ZCL_TEST
             return req.reject(400, 'User already exists and is verified. Please log in.');
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp       = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpiry = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
         if (existing && !existing.isVerified) {
@@ -1152,9 +972,9 @@ Run syntax check on class ZCL_TEST
 
         try {
             await sendMail({ destinationName: 'sap_process_automation_mail' }, [{
-                to: username,
+                to:      username,
                 subject: 'AnswerThink Enterprise AI Hub - Registration OTP',
-                text: `Your one-time password (OTP) is: ${otp}. It is valid for 10 minutes.`
+                text:    `Your one-time password (OTP) is: ${otp}. It is valid for 10 minutes.`
             }]);
             return `An OTP has been sent to ${username}.`;
         } catch (err) {
@@ -1185,7 +1005,7 @@ Run syntax check on class ZCL_TEST
         }
 
         const user = await SELECT.one.from('sap.aigateway.Users').where({ username, password });
-        if (!user) return req.reject(401, 'Invalid credentials or Register your User.');
+        if (!user)            return req.reject(401, 'Invalid credentials or Register your User.');
         if (!user.isVerified) return req.reject(403, 'Email not verified. Please register to generate a new OTP.');
 
         return user.ID;
@@ -1199,13 +1019,13 @@ Run syntax check on class ZCL_TEST
 
     this.on('validateABAPCode', async (req) => {
         const { code } = req.data;
-        const issues = await validateAbapSyntax(code);
+        const issues   = await validateAbapSyntax(code);
         return issues.length > 0 ? issues : ['No high-risk syntax issues found.'];
     });
 
     this.on('generateMultiModelResponse', async (req) => {
         const { prompt, category, extractedText } = req.data;
-        const claudeModel = resolveClaudeModel(category);
+        const claudeModel       = resolveClaudeModel(category);
         const promptWithContext = buildPromptWithContext(prompt, extractedText);
 
         const results = await Promise.allSettled([
@@ -1257,7 +1077,7 @@ Run syntax check on class ZCL_TEST
             console.log(`generateStream: loaded functionalSpec from session ${sessionId} (${functionalSpec.length} chars)`);
         }
 
-        const dbHistory = messagesData.map(m => ({ role: m.role, content: m.content }));
+        const dbHistory    = messagesData.map(m => ({ role: m.role, content: m.content }));
         const latencyStart = Date.now();
 
         try {
@@ -1265,7 +1085,7 @@ Run syntax check on class ZCL_TEST
 
             // Batch both inserts into a single DB call.
             await INSERT.into('sap.aigateway.ChatMessages').entries([
-                { session_ID: sessionId, role: 'user', content: prompt, modelId },
+                { session_ID: sessionId, role: 'user',      content: prompt,      modelId },
                 { session_ID: sessionId, role: 'assistant', content: finalOutput, modelId, latency: Date.now() - latencyStart }
             ]);
 
@@ -1276,7 +1096,7 @@ Run syntax check on class ZCL_TEST
             onChunk(errorMsg);
 
             await INSERT.into('sap.aigateway.ChatMessages').entries([
-                { session_ID: sessionId, role: 'user', content: prompt, modelId },
+                { session_ID: sessionId, role: 'user',      content: prompt,   modelId },
                 { session_ID: sessionId, role: 'assistant', content: errorMsg, modelId, latency: Date.now() - latencyStart }
             ]);
         }
