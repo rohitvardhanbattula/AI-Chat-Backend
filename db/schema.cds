@@ -11,11 +11,18 @@ entity Users : cuid, managed {
 }
 
 entity ChatSessions : cuid, managed {
-    userId        : String(100);
-    title         : String(255);
-    selectedModel : String(50);
-    functionalspec   : LargeString;
-    messages      : Composition of many ChatMessages on messages.session = $self;
+    userId          : String(100);
+    title           : String(255);
+    selectedModel   : String(50);
+
+    functionalspec  : LargeString;
+
+    sapUrl          : String(500);
+    sapUser         : String(200);
+    sapClient       : String(10);
+    sapLanguage     : String(10);
+
+    messages        : Composition of many ChatMessages on messages.session = $self;
 }
 
 entity ChatMessages : cuid, managed {
