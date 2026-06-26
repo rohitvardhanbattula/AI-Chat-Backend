@@ -1,46 +1,32 @@
-namespace sap.aigateway;
-
 using { cuid, managed } from '@sap/cds/common';
 
+namespace sap.aigateway;
+
 entity Users : cuid, managed {
-    username   : String(100) @unique;
-    password   : String(255);
-    otp        : String(6);
-    otpExpiry  : Timestamp;
-    isVerified : Boolean default false;
+    username     : String;
+    password     : String; // In production, this should be hashed
+    otp          : String;
+    otpExpiry    : Timestamp;
+    isVerified   : Boolean default false;
 }
 
 entity ChatSessions : cuid, managed {
-    userId          : String(100);
-    title           : String(255);
-    selectedModel   : String(50);
-
-    functionalspec  : LargeString;
-
-    sapUrl          : String(500);
-    sapUser         : String(200);
-    sapClient       : String(10);
-    sapLanguage     : String(10);
-
-    messages        : Composition of many ChatMessages on messages.session = $self;
+    userId         : String;
+    title          : String;
+    functionalspec : LargeString; // Optional functional spec attached to the session
 }
 
 entity ChatMessages : cuid, managed {
-    session   : Association to ChatSessions;
-    role      : String(20);      
-    content   : LargeString;     
-    modelId   : String(50);
-    latency   : Integer;       
+    session_ID : String; // Reference to ChatSessions
+    role       : String enum { user; assistant; system; tool };
+    content    : LargeString;
+    modelId    : String;
+    latency    : Integer;
 }
 
 entity Ratings : cuid, managed {
-    userId    : String(100);
-    modelId   : String(50);
-    category  : String(100);
-    rating    : Integer;
+    userId   : String;
+    modelId  : String;
+    category : String;
+    rating   : Integer; // E.g., 1 to 5
 }
-
-annotate ChatMessages with @(
-    Common.DefaultValues : { session_ID : null },
-    Capabilities.FilterRestrictions : { RequiresFilter : true }
-);

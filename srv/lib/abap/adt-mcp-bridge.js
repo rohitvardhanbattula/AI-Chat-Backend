@@ -1,0 +1,98 @@
+'use strict';
+const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+const path = require('path');
+
+class AdtMcpBridgeManager {
+    constructor() {
+        // Store in-memory connections mapped by sessionId
+        this.sessions = new Map();
+    }
+
+    async connectWithCredentials(sessionId, credentials) {
+        // Close and cleanup existing session if redefining
+        if (this.sessions.has(sessionId)) {
+            const existing = this.sessions.get(sessionId);
+            try {
+                // Attempt to close transport if method exists
+                if (existing.transport && typeof existing.transport.close === 'function') {
+                    await existing.transport.close();
+                }
+            } catch (e) {
+                console.warn(`Could not close existing transport for session ${sessionId}:`, e.message);
+            }
+            this.sessions.delete(sessionId);
+        }
+
+        const client = new Client({ name: `ai-chat-backend-${sessionId}`, version: '1.0.0' }, { capabilities: { tools: {} } });
+        // Correct path based on new folder structure
+        const serverPath = path.resolve(__dirname, '../../../mcp-abap-abap-adt-api-main/dist/index.js');
+        
+        // Inject credentials strictly in memory for this specific child process
+        const env = {
+            ...process.env,
+            SAP_URL: credentials.url,
+            SAP_USER: credentials.user,
+            SAP_PASSWORD: credentials.password,
+            SAP_CLIENT: credentials.client,
+            SAP_LANGUAGE: credentials.language
+        };
+
+        const transport = new StdioClientTransport({
+            command: 'node',
+            args: [serverPath],
+            env: env
+        });
+
+        await client.connect(transport);
+        const toolsResponse = await client.listTools();
+        const availableTools = toolsResponse.tools || [];
+        
+        this.sessions.set(sessionId, { client, transport, availableTools });
+        console.log(`[MCP Bridge] Session ${sessionId} connected. Registered ${availableTools.length} tools.`);
+        
+        // Verify by hitting a lightweight tool if available (e.g., discovery or ping)
+        // If your MCP server doesn't have a explicit 'login' tool, you might need to call a generic read tool here.
+        // Assuming 'adtDiscovery' is a safe, read-only tool to verify connection:
+        try {
+            const hasDiscovery = availableTools.find(t => t.name === 'adtDiscovery');
+            if (hasDiscovery) {
+                 await client.callTool({ name: 'adtDiscovery', arguments: { uri: '/' } });
+                 return "Connection established and verified.";
+            } else {
+                 return "Connection established (verification tool not found).";
+            }
+        } catch (err) {
+            this.sessions.delete(sessionId);
+            throw new Error(`Connection verification failed: Please check your SAP credentials and URL. (${err.message})`);
+        }
+    }
+
+    getToolsForLLM(sessionId) {
+        const session = this.sessions.get(sessionId);
+        if (!session) return [];
+        return session.availableTools.map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.inputSchema
+        }));
+    }
+
+    async executeTool(sessionId, name, args) {
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+            return JSON.stringify({ error: "No active SAP connection for this session. Please connect via the UI first." });
+        }
+        
+        try {
+            console.log(`[MCP Bridge] Executing tool '${name}' for session ${sessionId}...`);
+            const result = await session.client.callTool({ name, arguments: args });
+            return result.content[0].text;
+        } catch (err) {
+            console.error(`[MCP Bridge] Tool execution failed for '${name}':`, err);
+            return JSON.stringify({ error: err.message });
+        }
+    }
+}
+
+module.exports = new AdtMcpBridgeManager();

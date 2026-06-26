@@ -20,4 +20,5 @@ service AIService {
     action verifyOTP(username: String, otp: String) returns String;
     action submitRating(userId: String, modelId: String, category: String, rating: Integer) returns String;
     action validateABAPCode(code: LargeString) returns array of String;
+    action establishConnection(sessionId: String, url: String, user: String, password: String, client: String, language: String) returns String;
 }
