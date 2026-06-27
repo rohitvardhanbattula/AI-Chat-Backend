@@ -69,15 +69,6 @@ cds.on('bootstrap', app => {
 
     app.use(express.json({ limit: '5mb' }));
 
-    // ── DEV ONLY: inject a fake CDS user so dummy auth stops blocking OData ──
-    // In production NODE_ENV=production is set via mta.yaml so this is skipped
-    if (process.env.NODE_ENV !== 'production') {
-        app.use('/odata', (req, _res, next) => {
-            req.user = { id: 'dev-user', roles: [], tenant: 'default' };
-            next();
-        });
-    }
-
     // Security headers
     app.use((_req, res, next) => {
         res.setHeader('X-Content-Type-Options',  'nosniff');

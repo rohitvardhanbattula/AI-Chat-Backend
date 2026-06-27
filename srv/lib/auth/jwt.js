@@ -7,38 +7,46 @@ const { getCachedDestination } = require('../utils/helpers');
 const ACCESS_TOKEN_TTL  = 15 * 60;          // 15 minutes in seconds
 const REFRESH_TOKEN_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
 
+// ── Configuration error ───────────────────────────────────────────────────────
+// Thrown when the server itself is mis-configured (e.g. missing secret).
+// Distinguished from auth errors so middleware can return 500 instead of a
+// misleading 401 — this is what made the original 401s so hard to diagnose.
+class ConfigError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'ConfigError';
+        this.statusCode = 500;
+    }
+}
+
 // ── Secret resolution ─────────────────────────────────────────────────────────
+// IMPORTANT: JWT_SECRET is read from the environment ONLY, the same way in
+// every environment (local dev, hybrid, production). Do NOT make this depend
+// on an SAP destination, a profile, or NODE_ENV — that was the root cause of
+// the inconsistent dev/prod behaviour and the hard-to-diagnose 401s.
+//
+// Local dev / hybrid : set JWT_SECRET in a `.env` file (see `.env.example`).
+// Production (CF/BTP): set JWT_SECRET as an application environment variable,
+//                      e.g. `cf set-env ai-chat-backend-srv JWT_SECRET "..."`
+//                      (or via a deploy-time mtaext file — never commit it).
 let _cachedSecret = null;
-let _secretFetchedAt = 0;
-const SECRET_CACHE_TTL = 10 * 60 * 1000; // refresh secret cache every 10 min
 
 async function getJwtSecret() {
-    const now = Date.now();
-    if (_cachedSecret && (now - _secretFetchedAt) < SECRET_CACHE_TTL) {
-        return _cachedSecret;
-    }
-
-    try {
-        const dest = await getCachedDestination('AiChatDestination');
-        const secret = dest.originalProperties?.destinationConfiguration?.jwt_secret;
-        if (!secret || secret.length < 32) {
-            throw new Error('jwt_secret in destination is missing or too short (min 32 chars).');
-        }
-        _cachedSecret = secret;
-        _secretFetchedAt = now;
-        return secret;
-    } catch (destErr) {
-        // Fallback for local dev — env variable
-        const envSecret = process.env.JWT_SECRET;
-        if (envSecret && envSecret.length >= 32) {
-            console.warn('[JWT] Destination unavailable, using JWT_SECRET env variable.');
-            return envSecret;
-        }
-        throw new Error(
-            'JWT secret not available. Configure a "jwt_secret_store" destination ' +
-            'or set the JWT_SECRET environment variable (min 32 chars).'
+    if (_cachedSecret) return _cachedSecret;
+    const dest = await getCachedDestination('AiChatDestination');
+    const envSecret = dest.originalProperties?.destinationConfiguration?.jwt_secret;
+    //const envSecret = process.env.JWT_SECRET;
+    console.log('JWT_SECRET from destination:', envSecret ? '[REDACTED]' : '[MISSING]');
+    if (!envSecret || envSecret.length < 32) {
+        throw new ConfigError(
+            'Server misconfiguration: JWT_SECRET environment variable is missing or ' +
+            'shorter than 32 characters. Set it identically in every environment ' +
+            '(local .env, hybrid, and production) — see .env.example.'
         );
     }
+
+    _cachedSecret = envSecret;
+    return _cachedSecret;
 }
 
 // ── Token generation ──────────────────────────────────────────────────────────
@@ -62,6 +70,8 @@ function hashRefreshToken(token) {
 
 // ── Token verification ────────────────────────────────────────────────────────
 async function verifyAccessToken(token) {
+    // Let ConfigError (missing/bad JWT_SECRET) propagate as-is so callers can
+    // return 500 instead of a misleading 401 — this was previously masked.
     const secret = await getJwtSecret();
     try {
         const decoded = jwt.verify(token, secret, { algorithms: ['HS256'], issuer: 'ai-hub' });
@@ -117,6 +127,7 @@ async function purgeExpiredTokens() {
 }
 
 module.exports = {
+    ConfigError,
     getJwtSecret,
     signAccessToken,
     verifyAccessToken,

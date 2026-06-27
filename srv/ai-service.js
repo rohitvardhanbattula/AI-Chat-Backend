@@ -6,7 +6,7 @@ const AuthService = require('./lib/handlers/AuthService');
 const { MAX_PROMPTS_PER_SESSION } = require('./lib/utils/constants');
 const { callGemini, callGPT4o, callSAPGenAIHub, callClaude, resolveClaudeModel } = require('./lib/ai/llm-provider');
 const { buildPromptWithContext, GLOBAL_SYSTEM_INSTRUCTION } = require('./lib/utils/helpers');
-const { verifyAccessToken, purgeExpiredTokens } = require('./lib/auth/jwt');
+const { verifyAccessToken, purgeExpiredTokens, ConfigError } = require('./lib/auth/jwt');
 
 const MODEL_IDS = ['gemini', 'gpt4o', 'perplexity', 'claude'];
 
@@ -17,12 +17,13 @@ function sanitise(val, maxLen = 500_000) {
 }
 
 // ── JWT guard for CDS actions that need authentication ─────────────────────────
+// IMPORTANT: this now behaves identically in every environment (dev, hybrid,
+// production). It used to skip verification whenever NODE_ENV !== 'production',
+// which silently disabled auth locally and caused the behaviour to diverge
+// from production — exactly the kind of inconsistency that produced
+// hard-to-diagnose 401s. Always verify the token; the server is just easier to
+// run locally now that JWT_SECRET is a plain env var (see .env.example).
 async function requireJwt(req) {
-    // In dev/hybrid, skip JWT — CDS dummy auth handles access
-    // In production, NODE_ENV=production is set via mta.yaml
-    console.log('>>> requireJwt called, NODE_ENV:', process.env.NODE_ENV);
-    if (process.env.NODE_ENV !== 'production') return;
-    
     const raw = req._.req?.headers;
     const authHeader = raw?.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -33,6 +34,10 @@ async function requireJwt(req) {
         const payload = await verifyAccessToken(token);
         req.user = payload;
     } catch (err) {
+        if (err instanceof ConfigError) {
+            console.error('[Auth] Server misconfiguration:', err.message);
+            return req.reject(500, 'Server authentication is misconfigured. Contact an administrator.');
+        }
         return req.reject(401, err.message || 'Invalid token.');
     }
 }
