@@ -163,7 +163,7 @@ async function callClaudeViaGenHub(prompt, history = [], functionalSpec = null) 
         ? `${GLOBAL_SYSTEM_INSTRUCTION}\n\nFunctional Specification Context:\n${functionalSpec}`
         : GLOBAL_SYSTEM_INSTRUCTION;
     const messages   = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
-
+    console.log("messages", messages);
     const response = await executeHttpRequest(
         { destinationName: 'GENERATIVE_AI_HUB' },
         {
@@ -215,6 +215,7 @@ async function callClaudeViaApiKey(prompt, history = [], model = CLAUDE_MODEL_SI
 
 async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null) {
     const start = Date.now();
+    //console.log("claude");
     try {
         const content = await callClaudeViaGenHub(prompt, history, functionalSpec);
         return { modelId: 'claude', content, latency: Date.now() - start, model: 'opus-genhub' };

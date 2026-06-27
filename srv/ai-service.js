@@ -24,9 +24,10 @@ function sanitise(val, maxLen = 500_000) {
 // hard-to-diagnose 401s. Always verify the token; the server is just easier to
 // run locally now that JWT_SECRET is a plain env var (see .env.example).
 async function requireJwt(req) {
-    const raw = req._.req?.headers;
-    const authHeader = raw?.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const headers = req._.req?.headers;
+    const token = headers?.['x-custom-auth'] || 
+                  (headers?.authorization || '').replace('Bearer ', '') || 
+                  null;
 
     if (!token) return req.reject(401, 'Authentication required.');
 
@@ -51,7 +52,78 @@ setInterval(() => {
 
 // ── Service implementation ────────────────────────────────────────────────────
 module.exports = cds.service.impl(async function () {
+    this.on('getChatSessions', async (req) => {
+    await requireJwt(req);
+    const { userId } = req.user;
+    return await SELECT.from('sap.aigateway.ChatSessions')
+        .where({ userId })
+        .orderBy('createdAt desc');
+});
 
+this.on('getChatMessages', async (req) => {
+    await requireJwt(req);
+    const { sessionId } = req.data;
+    return await SELECT.from('sap.aigateway.ChatMessages')
+        .where({ session_ID: sessionId })
+        .orderBy('createdAt asc');
+});
+this.on('deleteSession', async (req) => {
+    await requireJwt(req);
+    const { sessionId } = req.data;
+    await DELETE.from('sap.aigateway.ChatSessions').where({ ID: sessionId });
+    return 'deleted';
+});
+this.on('createSession', async (req) => {
+    await requireJwt(req);
+    const { userId } = req.user;
+    const { title, selectedModel, functionalspec, messages } = req.data;
+    const { MAX_CHATS_PER_USER } = require('./lib/utils/constants');
+
+    const [{ count }] = await SELECT
+        .from('sap.aigateway.ChatSessions')
+        .columns('count(*) as count')
+        .where({ userId });
+
+    if (Number(count) >= MAX_CHATS_PER_USER) {
+        return req.reject(403, `Maximum of ${MAX_CHATS_PER_USER} chats reached.`);
+    }
+
+    const crypto = require('crypto');
+    const now    = new Date().toISOString();
+    const ID     = crypto.randomUUID();
+
+    await INSERT.into('sap.aigateway.ChatSessions').entries({
+        ID, userId,
+        title:         title.slice(0, 100),
+        selectedModel,
+        functionalspec: functionalspec ?? null,
+        createdAt:  now, createdBy:  userId,
+        modifiedAt: now, modifiedBy: userId
+    });
+
+    if (messages && messages.length > 0) {
+        const messageEntries = messages.map((m, i) => ({
+            ID:         crypto.randomUUID(),
+            session_ID: ID,
+            role:       m.role,
+            content:    m.content,
+            modelId:    m.modelId || selectedModel,
+            createdAt:  new Date(Date.now() + i).toISOString(),  // +i preserves order
+            createdBy:  userId,
+            modifiedAt: now,
+            modifiedBy: userId
+        }));
+        await INSERT.into('sap.aigateway.ChatMessages').entries(messageEntries);
+    }
+
+    return await SELECT.one.from('sap.aigateway.ChatSessions').where({ ID });
+});
+this.on('renameSession', async (req) => {
+    await requireJwt(req);
+    const { sessionId, title } = req.data;
+    await UPDATE('sap.aigateway.ChatSessions').set({ title }).where({ ID: sessionId });
+    return 'renamed';
+});
     // ── Auth — no JWT required ─────────────────────────────────────────────
     this.on('register',      AuthService.register);
     this.on('verifyOTP',     AuthService.verifyOTP);
@@ -59,16 +131,9 @@ module.exports = cds.service.impl(async function () {
     this.on('refreshToken',  AuthService.refreshToken);
     this.on('logout',        AuthService.logout);
 
-    // ── Protected: all actions below require a valid access token ──────────
-    this.before(['generateMultiModelResponse', 'sendChatMessage',
-                 'submitRating', 'validateABAPCode', 'establishConnection',
-                 'CREATE', 'UPDATE', 'DELETE', 'READ'], requireJwt);
-
-    // ── Chat session limits ────────────────────────────────────────────────
-    this.before('CREATE', 'ChatSessions', AuthService.checkChatLimits);
-
     // ── SAP ADT MCP connection ─────────────────────────────────────────────
     this.on('establishConnection', async (req) => {
+        await requireJwt(req);
         const { sessionId, url, user, password, client, language } = req.data;
         if (!sessionId || !url || !user || !password) {
             return req.reject(400, 'sessionId, url, user and password are required.');
@@ -86,6 +151,7 @@ module.exports = cds.service.impl(async function () {
 
     // ── ABAP validation ────────────────────────────────────────────────────
     this.on('validateABAPCode', async (req) => {
+        await requireJwt(req);
         const code = sanitise(req.data.code, 200_000);
         if (!code) return req.reject(400, 'code is required.');
         const issues = await validateAbapSyntax(code);
@@ -94,6 +160,7 @@ module.exports = cds.service.impl(async function () {
 
     // ── Multi-model comparison (non-streaming, used as fallback) ───────────
     this.on('generateMultiModelResponse', async (req) => {
+        await requireJwt(req);
         const prompt        = sanitise(req.data.prompt, 50_000);
         const category      = sanitise(req.data.category, 100);
         const extractedText = sanitise(req.data.extractedText, 200_000) || null;
@@ -117,13 +184,17 @@ module.exports = cds.service.impl(async function () {
     });
 
     // ── Rating ─────────────────────────────────────────────────────────────
-    this.on('submitRating', AuthService.submitRating);
+    this.on('submitRating', async (req) => {
+    await requireJwt(req);  // ← add this
+    return AuthService.submitRating(req);
+});
 
     // ── Streaming (no session — comparison screen) ─────────────────────────
     this.generateStreamNoSession = async function (modelId, prompt, category, extractedText, onChunk) {
         const safePrompt = sanitise(prompt, 50_000);
         const safeSpec   = sanitise(extractedText, 200_000) || null;
         try {
+            
             const output = await generateWithValidation(null, modelId, safePrompt, [], category, safeSpec);
             onChunk(output);
         } catch (err) {
@@ -134,47 +205,70 @@ module.exports = cds.service.impl(async function () {
 
     // ── Streaming (with session — active chat) ─────────────────────────────
     this.generateStream = async function (sessionId, modelId, prompt, category, extractedText, onChunk) {
-        const safePrompt = sanitise(prompt, 50_000);
-        const safeSpec   = sanitise(extractedText, 200_000) || null;
+    const crypto     = require('crypto');
+    const safePrompt = sanitise(prompt, 50_000);
+    const safeSpec   = sanitise(extractedText, 200_000) || null;
 
-        const [session, messagesData] = await Promise.all([
-            SELECT.one.from('sap.aigateway.ChatSessions').where({ ID: sessionId }),
-            SELECT.from('sap.aigateway.ChatMessages')
-                .where({ session_ID: sessionId })
-                .orderBy('createdAt asc')
+    const [session, messagesData] = await Promise.all([
+        SELECT.one.from('sap.aigateway.ChatSessions').where({ ID: sessionId }),
+        SELECT.from('sap.aigateway.ChatMessages')
+            .where({ session_ID: sessionId })
+            .orderBy('createdAt asc')
+    ]);
+
+    if (!session) throw new Error('Session not found.');
+
+    const userMessageCount = messagesData.reduce((acc, m) => acc + (m.role === 'user' ? 1 : 0), 0);
+    if (userMessageCount >= MAX_PROMPTS_PER_SESSION) {
+        throw new Error(`Maximum prompt limit (${MAX_PROMPTS_PER_SESSION}) reached. Please start a new chat.`);
+    }
+
+    const functionalSpec = safeSpec || session.functionalspec || null;
+    const dbHistory      = messagesData.map(m => ({ role: m.role, content: m.content }));
+    const latencyStart   = Date.now();
+
+    try {
+        const output  = await generateWithValidation(sessionId, modelId, safePrompt, dbHistory, category, functionalSpec);
+        const latency = Date.now() - latencyStart;
+        const now     = new Date().toISOString();
+
+        await INSERT.into('sap.aigateway.ChatMessages').entries([
+            {
+                ID: crypto.randomUUID(), session_ID: sessionId,
+                role: 'user', content: safePrompt, modelId,
+                createdAt: now, createdBy: 'system',
+                modifiedAt: now, modifiedBy: 'system'
+            },
+            {
+                ID: crypto.randomUUID(), session_ID: sessionId,
+                role: 'assistant', content: output, modelId, latency,
+                createdAt: new Date(Date.now() + 1).toISOString(), createdBy: 'system',
+                modifiedAt: now, modifiedBy: 'system'
+            }
         ]);
 
-        if (!session) throw new Error('Session not found.');
+        onChunk(output);
+    } catch (err) {
+        console.error('[generateStream]', err?.message);
+        const errMsg  = 'model is not available at the moment';
+        const latency = Date.now() - latencyStart;
+        const now     = new Date().toISOString();
+        onChunk(errMsg);
 
-        const userMessageCount = messagesData.reduce((acc, m) => acc + (m.role === 'user' ? 1 : 0), 0);
-        if (userMessageCount >= MAX_PROMPTS_PER_SESSION) {
-            throw new Error(`Maximum prompt limit (${MAX_PROMPTS_PER_SESSION}) reached. Please start a new chat.`);
-        }
-
-        const functionalSpec = safeSpec || session.functionalspec || null;
-        const dbHistory      = messagesData.map(m => ({ role: m.role, content: m.content }));
-        const latencyStart   = Date.now();
-
-        try {
-            const output  = await generateWithValidation(sessionId, modelId, safePrompt, dbHistory, category, functionalSpec);
-            const latency = Date.now() - latencyStart;
-
-            await INSERT.into('sap.aigateway.ChatMessages').entries([
-                { session_ID: sessionId, role: 'user',      content: safePrompt, modelId },
-                { session_ID: sessionId, role: 'assistant', content: output,     modelId, latency }
-            ]);
-
-            onChunk(output);
-        } catch (err) {
-            console.error('[generateStream]', err?.message);
-            const errMsg  = 'model is not available at the moment';
-            const latency = Date.now() - latencyStart;
-            onChunk(errMsg);
-
-            await INSERT.into('sap.aigateway.ChatMessages').entries([
-                { session_ID: sessionId, role: 'user',      content: safePrompt, modelId },
-                { session_ID: sessionId, role: 'assistant', content: errMsg,     modelId, latency }
-            ]);
-        }
-    };
+        await INSERT.into('sap.aigateway.ChatMessages').entries([
+            {
+                ID: crypto.randomUUID(), session_ID: sessionId,
+                role: 'user', content: safePrompt, modelId,
+                createdAt: now, createdBy: 'system',
+                modifiedAt: now, modifiedBy: 'system'
+            },
+            {
+                ID: crypto.randomUUID(), session_ID: sessionId,
+                role: 'assistant', content: errMsg, modelId, latency,
+                createdAt: new Date(Date.now() + 1).toISOString(), createdBy: 'system',
+                modifiedAt: now, modifiedBy: 'system'
+            }
+        ]);
+    }
+};
 });

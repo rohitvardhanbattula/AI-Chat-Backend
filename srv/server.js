@@ -64,7 +64,7 @@ function sendSSE(res, payload) {
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 cds.on('bootstrap', app => {
-
+    app.set('trust proxy', 1)
     app.use(cors());
 
     app.use(express.json({ limit: '5mb' }));
@@ -164,6 +164,7 @@ cds.on('bootstrap', app => {
             const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(': hb\n\n'); }, 15_000);
 
             try {
+                
                 const srv = await cds.connect.to('AIService');
                 await srv.generateStreamNoSession(modelId, prompt, category, extractedText, chunk => {
                     if (chunk) sendSSE(res, { status: 'chunk', content: chunk });

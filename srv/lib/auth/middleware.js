@@ -2,9 +2,9 @@
 const { verifyAccessToken, ConfigError } = require('./jwt');
 
 async function requireAuth(req, res, next) {
-    const authHeader = req.headers['authorization'] || '';
-    const token      = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
+    const token = req.headers['x-custom-auth'] || 
+                  (req.headers['authorization'] || '').replace('Bearer ', '') || 
+                  null;
     if (!token) {
         return res.status(401).json({ error: 'Missing Authorization header.' });
     }

@@ -1,15 +1,15 @@
 'use strict';
 const { callGemini, callClaude, callGPT4o, callSAPGenAIHub, resolveClaudeModel } = require('../ai/llm-provider');
 const { performValidation } = require('../abap/validation');
-const { buildPromptWithContext, buildRetryPrompt, buildFinalReport, GLOBAL_SYSTEM_INSTRUCTION, MAX_RETRIES } = require('../utils/helpers');
-
+const { buildPromptWithContext, buildRetryPrompt, buildFinalReport, GLOBAL_SYSTEM_INSTRUCTION } = require('../utils/helpers');
+const { MAX_RETRIES } = require('../utils/constants');
 async function generateWithValidation(sessionId, modelId, prompt, history, category, functionalSpec) {
     const normalizedModelId = (modelId || '').toLowerCase();
     const claudeModel = resolveClaudeModel(category);
     let attempt = 0;
     let currentPrompt = normalizedModelId === 'claude' ? prompt : buildPromptWithContext(prompt, functionalSpec);
     let internalHistory = [...history];
-
+    //console.log(`[generateWithValidation] sessionId: ${sessionId}, modelId: ${normalizedModelId}, attempt: ${attempt + 1}, prompt length: ${currentPrompt.length}, history length: ${internalHistory.length}`);
     const callModel = async (p, h) => {
         switch (normalizedModelId) {
             case 'gemini': {
@@ -17,6 +17,7 @@ async function generateWithValidation(sessionId, modelId, prompt, history, categ
                 return res.error ? 'model is not available at the moment' : res.content;
             }
             case 'claude': {
+                
                 const res = await callClaude(sessionId, p, h, claudeModel, functionalSpec);
                 return res.error ? 'model is not available at the moment' : res.content;
             }
@@ -32,6 +33,7 @@ async function generateWithValidation(sessionId, modelId, prompt, history, categ
     };
 
     while (attempt < MAX_RETRIES) {
+        //console.log("entry");
         const generatedText = await callModel(currentPrompt, internalHistory);
         if (generatedText === 'model is not available at the moment') return generatedText;
 

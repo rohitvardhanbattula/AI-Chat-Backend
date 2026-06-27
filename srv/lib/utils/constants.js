@@ -28,9 +28,9 @@ const CLAUDE_MODEL_COMPLEX = 'claude-opus-4-6';
 
 // ── GenAI Hub deployment IDs ──────────────────────────────────────────────────
 // Override via environment variables in BTP CF so you never have to redeploy to rotate
-const GENHUB_CLAUDE_DEPLOYMENT = process.env.GENHUB_CLAUDE_DEPLOYMENT || 'dacd7fd5faf9cdb9';
-const GENHUB_GEMINI_DEPLOYMENT = process.env.GENHUB_GEMINI_DEPLOYMENT || 'da91e1d34210e9fb';
-const GENHUB_GPT_DEPLOYMENT    = process.env.GENHUB_GPT_DEPLOYMENT    || 'd905723f4f0b8b08';
+const GENHUB_CLAUDE_DEPLOYMENT = 'dacd7fd5faf9cdb9';
+const GENHUB_GEMINI_DEPLOYMENT = 'da91e1d34210e9fb';
+const GENHUB_GPT_DEPLOYMENT    = 'd905723f4f0b8b08';
 
 // ── File upload ───────────────────────────────────────────────────────────────
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
