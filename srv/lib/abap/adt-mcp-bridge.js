@@ -124,15 +124,9 @@ class AdtMcpBridgeManager {
 
         mcpLog('INFO', 'CONNECT_LOGIN', { sessionId, tool: 'login', args: {} });
         const loginStart = Date.now();
+        let loginResult;
         try {
-            const loginResult = await client.callTool({ name: 'login', arguments: {} });
-            const loginText   = loginResult?.content?.[0]?.text;
-            mcpLog('INFO', 'CONNECT_OK', {
-                sessionId,
-                loginMs:  Date.now() - loginStart,
-                response: preview(loginText),
-            });
-            return `Connection established and authenticated. ${loginText ? loginText : ''}`.trim();
+            loginResult = await client.callTool({ name: 'login', arguments: {} });
         } catch (err) {
             this.sessions.delete(sessionId);
             mcpLog('ERROR', 'CONNECT_FAIL', {
@@ -143,6 +137,31 @@ class AdtMcpBridgeManager {
             });
             throw new Error(`SAP login failed: Please check your credentials and URL. (${err.message})`);
         }
+
+        const loginText = loginResult?.content?.[0]?.text;
+
+        // MCP tool-execution failures resolve normally with isError:true —
+        // they do NOT reject the promise. Without this check, a failed SAP
+        // login (e.g. a 500 from the ADT login endpoint) would fall through
+        // to the success path below and the connection would be marked
+        // "connected" even though authentication never succeeded.
+        if (loginResult?.isError) {
+            this.sessions.delete(sessionId);
+            mcpLog('ERROR', 'CONNECT_FAIL', {
+                sessionId,
+                tool:     'login',
+                loginMs:  Date.now() - loginStart,
+                error:    preview(loginText),
+            });
+            throw new Error(`SAP login failed: ${loginText || 'Unknown error'}`);
+        }
+
+        mcpLog('INFO', 'CONNECT_OK', {
+            sessionId,
+            loginMs:  Date.now() - loginStart,
+            response: preview(loginText),
+        });
+        return `Connection established and authenticated. ${loginText ? loginText : ''}`.trim();
     }
 
     // ── Remap ──────────────────────────────────────────────────────────────
@@ -203,6 +222,14 @@ class AdtMcpBridgeManager {
         try {
             const result = await session.client.callTool({ name: 'login', arguments: {} });
             const text   = result?.content?.[0]?.text || 'OK';
+
+            // As in connectWithCredentials: a failed login resolves with
+            // isError:true rather than rejecting. Treat that as disconnected.
+            if (result?.isError) {
+                mcpLog('WARN', 'CHECK_FAIL', { sessionId, pingMs: Date.now() - pingStart, error: preview(text) });
+                return { connected: false, message: `SAP ping failed: ${text || 'Unknown error'}` };
+            }
+
             mcpLog('INFO', 'CHECK_OK', { sessionId, pingMs: Date.now() - pingStart, response: preview(text) });
             return { connected: true, message: text };
         } catch (err) {
