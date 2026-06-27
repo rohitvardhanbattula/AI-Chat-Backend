@@ -14,7 +14,6 @@ class AdtMcpBridgeManager {
         if (this.sessions.has(sessionId)) {
             const existing = this.sessions.get(sessionId);
             try {
-                // Attempt to close transport if method exists
                 if (existing.transport && typeof existing.transport.close === 'function') {
                     await existing.transport.close();
                 }
@@ -25,9 +24,8 @@ class AdtMcpBridgeManager {
         }
 
         const client = new Client({ name: `ai-chat-backend-${sessionId}`, version: '1.0.0' }, { capabilities: { tools: {} } });
-        // Correct path based on new folder structure
         const serverPath = path.resolve(__dirname, '../../../mcp-abap-abap-adt-api-main/dist/index.js');
-        
+
         // Inject credentials strictly in memory for this specific child process
         const env = {
             ...process.env,
@@ -47,24 +45,27 @@ class AdtMcpBridgeManager {
         await client.connect(transport);
         const toolsResponse = await client.listTools();
         const availableTools = toolsResponse.tools || [];
-        
+
+        // Store session before login so executeTool can use it
         this.sessions.set(sessionId, { client, transport, availableTools });
         console.log(`[MCP Bridge] Session ${sessionId} connected. Registered ${availableTools.length} tools.`);
-        
-        // Verify by hitting a lightweight tool if available (e.g., discovery or ping)
-        // If your MCP server doesn't have a explicit 'login' tool, you might need to call a generic read tool here.
-        // Assuming 'adtDiscovery' is a safe, read-only tool to verify connection:
+
+        // Connection is only considered successful when the login tool succeeds.
+        // If login throws, we clean up the session and surface the error.
+        const hasLogin = availableTools.find(t => t.name === 'login');
+        if (!hasLogin) {
+            this.sessions.delete(sessionId);
+            throw new Error('MCP server does not expose a login tool. Cannot verify connection.');
+        }
+
         try {
-            const hasDiscovery = availableTools.find(t => t.name === 'adtDiscovery');
-            if (hasDiscovery) {
-                 await client.callTool({ name: 'adtDiscovery', arguments: { uri: '/' } });
-                 return "Connection established and verified.";
-            } else {
-                 return "Connection established (verification tool not found).";
-            }
+            const loginResult = await client.callTool({ name: 'login', arguments: {} });
+            const loginText = loginResult?.content?.[0]?.text;
+            console.log(`[MCP Bridge] Login successful for session ${sessionId}:`, loginText);
+            return `Connection established and authenticated. ${loginText ? loginText : ''}`.trim();
         } catch (err) {
             this.sessions.delete(sessionId);
-            throw new Error(`Connection verification failed: Please check your SAP credentials and URL. (${err.message})`);
+            throw new Error(`SAP login failed: Please check your credentials and URL. (${err.message})`);
         }
     }
 
@@ -81,9 +82,9 @@ class AdtMcpBridgeManager {
     async executeTool(sessionId, name, args) {
         const session = this.sessions.get(sessionId);
         if (!session) {
-            return JSON.stringify({ error: "No active SAP connection for this session. Please connect via the UI first." });
+            return JSON.stringify({ error: 'No active SAP connection for this session. Please connect via the UI first.' });
         }
-        
+
         try {
             console.log(`[MCP Bridge] Executing tool '${name}' for session ${sessionId}...`);
             const result = await session.client.callTool({ name, arguments: args });

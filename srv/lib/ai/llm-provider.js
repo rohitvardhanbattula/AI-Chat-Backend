@@ -13,6 +13,8 @@ const {
 module.exports.resolveClaudeModel = resolveClaudeModel;
 
 // ─── Agentic tool loop ────────────────────────────────────────────────────────
+// providerCallFn(prompt, systemInstruction, history, tools) → { content, toolCalls }
+// toolCalls: [{ id, name, arguments }] | null
 async function agenticToolLoop(sessionId, prompt, systemInstruction, history, providerCallFn) {
     let currentHistory  = [...history];
     let toolLoopCount   = 0;
@@ -139,15 +141,33 @@ async function callGemini(sessionId, prompt, systemInstruction, history = []) {
 
 // ─── Claude ───────────────────────────────────────────────────────────────────
 function sanitiseHistoryForClaude(history) {
-    // Claude only accepts user/assistant roles in message history
-    return history
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => ({ role: m.role, content: m.content || '' }));
+    // Claude requires strictly alternating user/assistant turns.
+    // Tool-result turns from the agentic loop are serialised as user messages
+    // so the conversation stays valid when replayed through trimContext.
+    return history.map(m => {
+        if (m.role === 'tool') {
+            // Flatten tool results into a user-turn text block
+            const resultText = m.results
+                .map(r => `[Tool: ${r.name}]\n${r.result}`)
+                .join('\n\n');
+            return { role: 'user', content: resultText };
+        }
+        if (m.role === 'assistant' && m.toolCalls) {
+            // Represent the assistant's tool-call decision as plain text
+            const callText = m.toolCalls
+                .map(tc => `[Calling tool: ${tc.name} with args: ${JSON.stringify(tc.arguments)}]`)
+                .join('\n');
+            return { role: 'assistant', content: (m.content ? m.content + '\n' : '') + callText };
+        }
+        if (m.role === 'user' || m.role === 'assistant') {
+            return { role: m.role, content: m.content || '' };
+        }
+        return null;
+    }).filter(Boolean);
 }
 
 function applyCacheBreakpoint(history) {
     if (!history.length) return history;
-    // Mark the last message for prompt caching
     return history.map((m, idx) => {
         if (idx !== history.length - 1) return m;
         return {
@@ -157,72 +177,119 @@ function applyCacheBreakpoint(history) {
     });
 }
 
-async function callClaudeViaGenHub(prompt, history = [], functionalSpec = null) {
-    const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, sanitiseHistoryForClaude(history));
-    const systemText = functionalSpec
-        ? `${GLOBAL_SYSTEM_INSTRUCTION}\n\nFunctional Specification Context:\n${functionalSpec}`
-        : GLOBAL_SYSTEM_INSTRUCTION;
-    const messages   = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
-    console.log("messages", messages);
-    const response = await executeHttpRequest(
-        { destinationName: 'GENERATIVE_AI_HUB' },
-        {
-            method:  'POST',
-            url:     `/inference/deployments/${GENHUB_CLAUDE_DEPLOYMENT}/invoke`,
-            headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
-            data:    { anthropic_version: 'bedrock-2023-05-31', system: systemText, max_tokens: 5000, messages }
-        },
-        { fetchCsrfToken: false }
-    );
-
-    const content = response.data?.content?.[0]?.text;
-    if (!content) throw new Error('Empty response from Claude via GenAI Hub');
-    return content;
+// Converts MCP tools to Anthropic tool format
+function mcpToolsToClaudeFormat(tools) {
+    return tools.map(t => ({
+        name: t.name,
+        description: t.description || '',
+        input_schema: t.parameters || { type: 'object', properties: {} }
+    }));
 }
 
-async function callClaudeViaApiKey(prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null) {
-    const { history: safeHistory, prompt: safePrompt } = trimContext(
-        prompt, sanitiseHistoryForClaude(history), CLAUDE_MAX_INPUT_TOKENS
-    );
-    const dest    = await getCachedDestination('claude_api');
-    const apikey  = dest.originalProperties?.apikey;
-    if (!apikey)  throw new Error('Claude API key destination is not configured correctly.');
+// Inner provider fn used by agenticToolLoop for Claude via GenAI Hub
+async function callClaudeViaGenHubInner(functionalSpec) {
+    return async function(prompt, systemInstruction, history, tools) {
+        const cleanHistory = sanitiseHistoryForClaude(history);
+        const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, cleanHistory);
 
-    const messages     = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
-    const systemBlocks = require('../utils/helpers').buildClaudeSystemBlocks(functionalSpec);
+        const systemText = functionalSpec
+            ? `${systemInstruction}\n\nFunctional Specification Context:\n${functionalSpec}`
+            : systemInstruction;
+        const messages = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method:  'POST',
-        headers: {
-            'x-api-key':         apikey,
-            'anthropic-version': '2023-06-01',
-            'anthropic-beta':    'prompt-caching-2024-07-31',
-            'content-type':      'application/json'
-        },
-        body: JSON.stringify({ model, max_tokens: MAX_OUTPUT_TOKENS_CLAUDE, system: systemBlocks, messages })
-    });
+        const body = {
+            anthropic_version: 'bedrock-2023-05-31',
+            system: systemText,
+            max_tokens: 5000,
+            messages
+        };
+        if (tools.length > 0) {
+            body.tools = mcpToolsToClaudeFormat(tools);
+        }
 
-    if (!response.ok) {
-        const errBody = await response.text().catch(() => '');
-        throw new Error(`Claude API returned ${response.status}: ${errBody.slice(0, 200)}`);
-    }
+        const response = await executeHttpRequest(
+            { destinationName: 'GENERATIVE_AI_HUB' },
+            {
+                method:  'POST',
+                url:     `/inference/deployments/${GENHUB_CLAUDE_DEPLOYMENT}/invoke`,
+                headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
+                data:    body
+            },
+            { fetchCsrfToken: false }
+        );
 
-    const data    = await response.json();
-    const content = data?.content?.[0]?.text;
-    if (!content) throw new Error('Empty response from Claude API');
-    return content;
+        const contentBlocks = response.data?.content || [];
+        const text       = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('');
+        const toolUses   = contentBlocks.filter(b => b.type === 'tool_use');
+        const toolCalls  = toolUses.length > 0
+            ? toolUses.map(b => ({ id: b.id, name: b.name, arguments: b.input }))
+            : null;
+
+        if (!text && !toolCalls) throw new Error('Empty response from Claude via GenAI Hub');
+        return { content: text, toolCalls };
+    };
+}
+
+// Inner provider fn used by agenticToolLoop for Claude via direct API key
+async function callClaudeViaApiKeyInner(model, functionalSpec, apikey) {
+    return async function(prompt, systemInstruction, history, tools) {
+        const cleanHistory = sanitiseHistoryForClaude(history);
+        const { history: safeHistory, prompt: safePrompt } = trimContext(
+            prompt, cleanHistory, CLAUDE_MAX_INPUT_TOKENS
+        );
+
+        const messages     = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
+        const systemBlocks = require('../utils/helpers').buildClaudeSystemBlocks(functionalSpec);
+
+        const body = { model, max_tokens: MAX_OUTPUT_TOKENS_CLAUDE, system: systemBlocks, messages };
+        if (tools.length > 0) {
+            body.tools = mcpToolsToClaudeFormat(tools);
+        }
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method:  'POST',
+            headers: {
+                'x-api-key':         apikey,
+                'anthropic-version': '2023-06-01',
+                'anthropic-beta':    'prompt-caching-2024-07-31',
+                'content-type':      'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const errBody = await response.text().catch(() => '');
+            throw new Error(`Claude API returned ${response.status}: ${errBody.slice(0, 200)}`);
+        }
+
+        const data          = await response.json();
+        const contentBlocks = data?.content || [];
+        const text          = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('');
+        const toolUses      = contentBlocks.filter(b => b.type === 'tool_use');
+        const toolCalls     = toolUses.length > 0
+            ? toolUses.map(b => ({ id: b.id, name: b.name, arguments: b.input }))
+            : null;
+
+        if (!text && !toolCalls) throw new Error('Empty response from Claude API');
+        return { content: text, toolCalls };
+    };
 }
 
 async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null) {
     const start = Date.now();
-    //console.log("claude");
     try {
-        const content = await callClaudeViaGenHub(prompt, history, functionalSpec);
+        const providerFn = await callClaudeViaGenHubInner(functionalSpec);
+        const content    = await agenticToolLoop(sessionId, prompt, GLOBAL_SYSTEM_INSTRUCTION, history, providerFn);
         return { modelId: 'claude', content, latency: Date.now() - start, model: 'opus-genhub' };
     } catch (hubErr) {
         console.warn('callClaude: GenAI Hub failed, falling back to API key:', hubErr?.message);
         try {
-            const content = await callClaudeViaApiKey(prompt, history, model, functionalSpec);
+            const dest    = await getCachedDestination('claude_api');
+            const apikey  = dest.originalProperties?.apikey;
+            if (!apikey) throw new Error('Claude API key destination is not configured correctly.');
+
+            const providerFn = await callClaudeViaApiKeyInner(model, functionalSpec, apikey);
+            const content    = await agenticToolLoop(sessionId, prompt, GLOBAL_SYSTEM_INSTRUCTION, history, providerFn);
             return { modelId: 'claude', content, latency: Date.now() - start, model };
         } catch (fallbackErr) {
             console.error('callClaude: fallback also failed:', fallbackErr?.message);
@@ -232,15 +299,64 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
 }
 
 // ─── GPT-4o ───────────────────────────────────────────────────────────────────
-async function callGPT4o(sessionId, prompt, systemInstruction, history = []) {
-    const start = Date.now();
-    try {
+
+// Converts MCP tools to OpenAI function-calling format
+function mcpToolsToGPTFormat(tools) {
+    return tools.map(t => ({
+        type: 'function',
+        function: {
+            name: t.name,
+            description: t.description || '',
+            parameters: t.parameters || { type: 'object', properties: {} }
+        }
+    }));
+}
+
+// Serialises agentic history into the flat OpenAI messages array format.
+// tool-call turns become an assistant message with tool_calls + individual
+// tool messages for each result.
+function buildGPTMessages(systemInstruction, history, prompt) {
+    const messages = [{ role: 'system', content: systemInstruction }];
+
+    for (const m of history) {
+        if (m.role === 'assistant' && m.toolCalls) {
+            messages.push({
+                role: 'assistant',
+                content: m.content || null,
+                tool_calls: m.toolCalls.map(tc => ({
+                    id:       tc.id,
+                    type:     'function',
+                    function: { name: tc.name, arguments: JSON.stringify(tc.arguments) }
+                }))
+            });
+        } else if (m.role === 'tool') {
+            for (const r of m.results) {
+                messages.push({
+                    role:         'tool',
+                    tool_call_id: r.toolCallId,
+                    content:      r.result
+                });
+            }
+        } else if (m.role === 'user' || m.role === 'assistant') {
+            messages.push({ role: m.role, content: m.content || '' });
+        }
+    }
+
+    messages.push({ role: 'user', content: prompt });
+    return messages;
+}
+
+// Inner provider fn used by agenticToolLoop for GPT-4o
+function callGPT4oInner(systemInstruction) {
+    return async function(prompt, _sysInstr, history, tools) {
         const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, history, GPT_MAX_INPUT_TOKENS);
-        const messages = [
-            { role: 'system', content: systemInstruction },
-            ...safeHistory,
-            { role: 'user', content: safePrompt }
-        ];
+        const messages = buildGPTMessages(systemInstruction, safeHistory, safePrompt);
+
+        const body = { model: 'gpt-5.2', temperature: 0.5, messages };
+        if (tools.length > 0) {
+            body.tools       = mcpToolsToGPTFormat(tools);
+            body.tool_choice = 'auto';
+        }
 
         const response = await executeHttpRequest(
             { destinationName: 'GENERATIVE_AI_HUB' },
@@ -248,13 +364,33 @@ async function callGPT4o(sessionId, prompt, systemInstruction, history = []) {
                 method:  'POST',
                 url:     '/inference/deployments/d905723f4f0b8b08/chat/completions?api-version=2024-02-15-preview',
                 headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
-                data:    { model: 'gpt-5.2', temperature: 0.5, messages }
+                data:    body
             },
             { fetchCsrfToken: false }
         );
 
-        const content = response.data?.choices?.[0]?.message?.content;
-        if (!content) throw new Error('Empty response from GPT-4o');
+        const choice     = response.data?.choices?.[0];
+        const message    = choice?.message || {};
+        const text       = message.content || '';
+        const rawCalls   = message.tool_calls || [];
+        const toolCalls  = rawCalls.length > 0
+            ? rawCalls.map(tc => ({
+                id:        tc.id,
+                name:      tc.function.name,
+                arguments: JSON.parse(tc.function.arguments || '{}')
+            }))
+            : null;
+
+        if (!text && !toolCalls) throw new Error('Empty response from GPT-4o');
+        return { content: text, toolCalls };
+    };
+}
+
+async function callGPT4o(sessionId, prompt, systemInstruction, history = []) {
+    const start = Date.now();
+    try {
+        const providerFn = callGPT4oInner(systemInstruction);
+        const content    = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
         return { modelId: 'gpt4o', content, latency: Date.now() - start };
     } catch (err) {
         console.error('callGPT4o error:', err?.message);

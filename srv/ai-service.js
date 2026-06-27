@@ -141,7 +141,6 @@ this.on('renameSession', async (req) => {
         try {
             const mcpBridge  = require('./lib/abap/adt-mcp-bridge');
             const result     = await mcpBridge.connectWithCredentials(sessionId, { url, user, password, client, language });
-            await mcpBridge.executeTool(sessionId, 'login', {});
             return result;
         } catch (err) {
             console.error('[MCP Bridge] Connection error:', err?.message);
