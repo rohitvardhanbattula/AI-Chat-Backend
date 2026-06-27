@@ -1,12 +1,15 @@
 'use strict';
 const { getDestination } = require('@sap-cloud-sdk/connectivity');
-const { 
-    MAX_INPUT_TOKENS, CHARS_PER_TOKEN, MAX_HISTORY_MESSAGES, 
-    CLAUDE_MODEL_COMPLEX, CLAUDE_MODEL_SIMPLE, GLOBAL_SYSTEM_INSTRUCTION 
+const {
+    MAX_INPUT_TOKENS, CHARS_PER_TOKEN, MAX_HISTORY_MESSAGES,
+    CLAUDE_MODEL_COMPLEX, CLAUDE_MODEL_SIMPLE, GLOBAL_SYSTEM_INSTRUCTION,
+    GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
+    CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS, MAX_OUTPUT_TOKENS_CLAUDE
 } = require('./constants');
 
-const DEST_CACHE      = new Map();
-const DEST_CACHE_TTL  = 5 * 60 * 1000;
+// ─── Destination cache ────────────────────────────────────────────────────────
+const DEST_CACHE     = new Map();
+const DEST_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 async function getCachedDestination(name) {
     const now    = Date.now();
@@ -18,23 +21,27 @@ async function getCachedDestination(name) {
     return dest;
 }
 
+// ─── Context trimming ─────────────────────────────────────────────────────────
+/**
+ * Trim conversation history + prompt to stay within token budget.
+ * Removes oldest messages first (always keeps user's current prompt).
+ */
 function trimContext(prompt, history, maxTokens = MAX_INPUT_TOKENS) {
     let trimmed = history.slice(-MAX_HISTORY_MESSAGES);
 
     const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
     let historyTokens  = trimmed.reduce((acc, m) => {
-        const content = typeof m.content === 'string'
-            ? m.content
-            : JSON.stringify(m.content);
-        return acc + Math.ceil((content || '').length / CHARS_PER_TOKEN);
+        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
+        return acc + Math.ceil(content.length / CHARS_PER_TOKEN);
     }, 0);
 
+    // Remove oldest messages until we fit within budget
     while (trimmed.length > 0 && (promptTokens + historyTokens) > maxTokens) {
-        const removed = trimmed.shift();
+        const removed        = trimmed.shift();
         const removedContent = typeof removed.content === 'string'
             ? removed.content
-            : JSON.stringify(removed.content);
-        historyTokens -= Math.ceil((removedContent || '').length / CHARS_PER_TOKEN);
+            : JSON.stringify(removed.content || '');
+        historyTokens -= Math.ceil(removedContent.length / CHARS_PER_TOKEN);
     }
 
     let finalPrompt = prompt;
@@ -47,6 +54,7 @@ function trimContext(prompt, history, maxTokens = MAX_INPUT_TOKENS) {
     return { history: trimmed, prompt: finalPrompt };
 }
 
+// ─── Spec truncation ──────────────────────────────────────────────────────────
 function truncateSpec(spec, reserve = 1000) {
     const limit = (MAX_INPUT_TOKENS * CHARS_PER_TOKEN) - reserve;
     return spec.length > limit
@@ -54,6 +62,7 @@ function truncateSpec(spec, reserve = 1000) {
         : spec;
 }
 
+// ─── Prompt building ──────────────────────────────────────────────────────────
 function buildPromptWithContext(prompt, functionalSpec) {
     if (!functionalSpec) return prompt;
     return `${prompt}\n\nFunctional Specification Context:\n${truncateSpec(functionalSpec, prompt.length + 1000)}`;
@@ -71,15 +80,17 @@ function buildClaudeSystemBlocks(functionalSpec) {
     return blocks;
 }
 
+// ─── Model resolution ─────────────────────────────────────────────────────────
 function resolveClaudeModel(category) {
     return (category || '').toString().toLowerCase().includes('complex')
         ? CLAUDE_MODEL_COMPLEX
         : CLAUDE_MODEL_SIMPLE;
 }
 
+// ─── Retry prompt construction ────────────────────────────────────────────────
 function buildRetryPrompt(feedback, invalidObjects, attempt) {
-    const toReplace = invalidObjects.filter(obj => obj.successor);
-    const classicOrNTBR = invalidObjects.filter(obj => !obj.successor && (obj.reason === 'classic_api' || obj.reason === 'not_to_be_released'));
+    const toReplace      = invalidObjects.filter(obj => obj.successor);
+    const classicOrNTBR  = invalidObjects.filter(obj => !obj.successor && (obj.reason === 'classic_api' || obj.reason === 'not_to_be_released'));
 
     const replacementLines = toReplace.map(
         obj => `- Replace '${obj.name}' with its official SAP Cloud Tier 1 successor: '${obj.successor}'`
@@ -96,7 +107,7 @@ function buildRetryPrompt(feedback, invalidObjects, attempt) {
         '### Errors to Fix',
         feedback,
         replacementLines.length ? '\n### Required Replacements (Deprecated → Successor)\n' + replacementLines.join('\n') : '',
-        classicLines.length     ? '\n### Classic API / Not To Be Released — Must Use Tier 1 Alternatives\n' + classicLines.join('\n')     : ''
+        classicLines.length     ? '\n### Classic API / Not To Be Released — Must Use Tier 1 Alternatives\n' + classicLines.join('\n') : ''
     ].filter(Boolean).join('\n');
 }
 
@@ -113,5 +124,9 @@ function buildFinalReport(generatedText, feedback) {
 
 module.exports = {
     getCachedDestination, trimContext, truncateSpec, buildPromptWithContext,
-    buildClaudeSystemBlocks, resolveClaudeModel, buildRetryPrompt, buildFinalReport, GLOBAL_SYSTEM_INSTRUCTION
+    buildClaudeSystemBlocks, resolveClaudeModel, buildRetryPrompt, buildFinalReport,
+    GLOBAL_SYSTEM_INSTRUCTION,
+    GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
+    CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS, MAX_OUTPUT_TOKENS_CLAUDE,
+    CLAUDE_MODEL_SIMPLE, CLAUDE_MODEL_COMPLEX
 };

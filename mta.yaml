@@ -1,69 +1,47 @@
-_schema-version: 3.3.0
-ID: ai-chatbackend
+_schema-version: '3.1'
+ID: ai-chat-backend
 version: 1.0.0
-description: "A simple CAP project."
-parameters:
-  enable-parallel-deployments: true
-build-parameters:
-  before-all:
-    - builder: custom
-      commands:
-        - npm ci
-        - npx cds build --production
+description: AnswerThink Enterprise AI Hub — CAP Backend
+
 modules:
-  - name: ai-chatbackend-srv
+  - name: ai-chat-backend-srv
     type: nodejs
-    path: gen/srv
+    path: .
     parameters:
-      instances: 1
       buildpack: nodejs_buildpack
+      memory: 512M
+      disk-quota: 1G
     build-parameters:
-      builder: npm-ci
+      builder: npm
+      ignore:
+        - node_modules/
+    properties:
+      NODE_ENV: production
+    requires:
+      - name: ai-chat-db
+      - name: ai-chat-dest
     provides:
-      - name: srv-api # required by consumers of CAP services (e.g. approuter)
+      - name: srv-api
         properties:
           srv-url: ${default-url}
-    requires:
-      - name: ai-chatbackend-db
-      - name: ai-chatbackend-uaa
-      - name: ai-chatbackend-destination
-      - name: ai-chatbackend-connectivity
 
-  - name: ai-chatbackend-db-deployer
+  - name: ai-chat-backend-db-deployer
     type: hdb
-    path: gen/db
+    path: db
     parameters:
       buildpack: nodejs_buildpack
     requires:
-      - name: ai-chatbackend-db
+      - name: ai-chat-db
 
 resources:
-  - name: ai-chatbackend-uaa
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: xsuaa
-      service-plan: application
-      path: ./xs-security.json
-      config:
-        xsappname: ai-chatbackend
-        tenant-mode: dedicated
-
-  # --- Destination Service (To find the on-prem system) ---
-  - name: ai-chatbackend-destination
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: destination
-      service-plan: lite
-
-  # --- Connectivity Service (The tunnel to on-prem) ---
-  - name: ai-chatbackend-connectivity
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: connectivity
-      service-plan: lite
-
-  - name: ai-chatbackend-db
+  - name: ai-chat-db
     type: com.sap.xs.hdi-container
     parameters:
       service: hana
       service-plan: hdi-shared
+
+  - name: ai-chat-dest
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
