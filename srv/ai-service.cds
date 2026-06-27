@@ -37,6 +37,11 @@ service AIService {
         expiresIn    : Integer; // seconds
     }
 
+    type ConnectionStatus {
+        connected : Boolean;
+        message   : String;
+    }
+
     // ── Auth actions ──────────────────────────────────────────────────────────
     action register(username: String, password: String)                                             returns String;
     action verifyOTP(username: String, otp: String)                                                 returns AuthTokens;
@@ -71,10 +76,22 @@ service AIService {
 
     action validateABAPCode(code: LargeString)                                                      returns array of String;
 
+    // ── SAP ADT connection actions ────────────────────────────────────────────
+
+    // Initial connection — accepts either a real sessionId or a client-generated
+    // tempId when the DB session does not exist yet.
     action establishConnection(sessionId: String,
                                url: String,
                                user: String,
                                password: String,
                                client: String,
                                language: String)                                                    returns String;
+
+    // Move a pre-session (temp) connection to the real DB session UUID.
+    // Call this immediately after createSession() succeeds.
+    action remapConnection(tempId: String, newSessionId: String)                                    returns String;
+
+    // Ping whether the MCP bridge for a session is still alive.
+    // Returns { connected: Boolean, message: String }.
+    action checkConnection(sessionId: String)                                                       returns ConnectionStatus;
 }
