@@ -4,7 +4,7 @@ version: 1.0.0
 description: AnswerThink Enterprise AI Hub — CAP Backend
 
 modules:
-  - name: ai-chat-backend-srv
+  - name: ai-chatbackend-srv
     type: nodejs
     path: .
     parameters:
@@ -18,8 +18,10 @@ modules:
     properties:
       NODE_ENV: production
     requires:
-      - name: ai-chat-db
-      - name: ai-chat-dest
+      - name: ai-chatbackendtest-db
+      - name: ai-chatbackend-uaa
+      - name: ai-chatbackend-destination
+      - name: ai-chatbackend-connectivity
     provides:
       - name: srv-api
         properties:
@@ -31,17 +33,35 @@ modules:
     parameters:
       buildpack: nodejs_buildpack
     requires:
-      - name: ai-chat-db
+      - name: ai-chatbackendtest-db
 
 resources:
-  - name: ai-chat-db
-    type: com.sap.xs.hdi-container
+  - name: ai-chatbackend-uaa
+    type: org.cloudfoundry.managed-service
     parameters:
-      service: hana
-      service-plan: hdi-shared
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: ai-chatbackend
+        tenant-mode: dedicated
 
-  - name: ai-chat-dest
+  # --- Destination Service (To find the on-prem system) ---
+  - name: ai-chatbackend-destination
     type: org.cloudfoundry.managed-service
     parameters:
       service: destination
       service-plan: lite
+
+  # --- Connectivity Service (The tunnel to on-prem) ---
+  - name: ai-chatbackend-connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite
+
+  - name: ai-chatbackendtest-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
