@@ -6,7 +6,7 @@ const {
     getCachedDestination, trimContext, GLOBAL_SYSTEM_INSTRUCTION, resolveClaudeModel,
     GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
     CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS,
-    MAX_OUTPUT_TOKENS_CLAUDE, CLAUDE_MODEL_SIMPLE
+    MAX_OUTPUT_TOKENS_CLAUDE, CLAUDE_MODEL_SIMPLE,GENHUB_GPT_DEPLOYMENT
 } = require('../utils/helpers');
 
 // Re-export resolveClaudeModel so callers that import it from here continue to work
@@ -362,7 +362,7 @@ function callGPT4oInner(systemInstruction) {
             { destinationName: 'GENERATIVE_AI_HUB' },
             {
                 method:  'POST',
-                url:     '/inference/deployments/d905723f4f0b8b08/chat/completions?api-version=2024-02-15-preview',
+                url: `/inference/deployments/${GENHUB_GPT_DEPLOYMENT}/chat/completions?api-version=2024-02-15-preview`,
                 headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
                 data:    body
             },

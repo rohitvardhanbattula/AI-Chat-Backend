@@ -67,7 +67,7 @@ cds.on('bootstrap', app => {
     app.set('trust proxy', 1)
     app.use(cors());
 
-    app.use(express.json({ limit: '5mb' }));
+    app.use(express.json({ limit: '50mb' }));
 
     // Security headers
     app.use((_req, res, next) => {

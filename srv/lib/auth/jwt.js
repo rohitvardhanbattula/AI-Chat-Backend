@@ -123,7 +123,7 @@ async function revokeRefreshToken(tokenValue) {
 // Housekeeping — called periodically to purge expired tokens
 async function purgeExpiredTokens() {
     const now = new Date().toISOString();
-    await DELETE.from('sap.aigateway.RefreshTokens').where(`expiresAt < '${now}'`);
+    await DELETE.from('sap.aigateway.RefreshTokens').where({ expiresAt: { '<': now } });
 }
 
 module.exports = {
