@@ -105,11 +105,11 @@ class AdtMcpBridgeManager {
         const availableTools = toolsResponse.tools || [];
         const toolNames      = availableTools.map(t => t.name);
 
-        mcpLog('INFO', 'CONNECT_TOOLS', {
-            sessionId,
-            toolCount: availableTools.length,
-            tools:     toolNames,
-        });
+        // mcpLog('INFO', 'CONNECT_TOOLS', {
+        //     sessionId,
+        //     toolCount: availableTools.length,
+        //     tools:     toolNames,
+        // });
 
         // Store session before login so executeTool can use it
         this.sessions.set(sessionId, { client, transport, availableTools });
