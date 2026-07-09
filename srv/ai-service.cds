@@ -23,6 +23,12 @@ service AIService {
 
     entity Ratings      as projection on db.Ratings;
 
+    entity Destinations as
+        projection on db.Destinations {
+            *
+        }
+        where isActive = true; // only active destinations are ever exposed to the client
+
     // ── Response types ────────────────────────────────────────────────────────
     type ModelResponse {
         modelId : String;
@@ -50,6 +56,10 @@ service AIService {
     action logout(refreshToken: String)                                                             returns String;
     action getChatSessions()                                                                        returns array of ChatSessions;
     action getChatMessages(sessionId: UUID)                                                         returns array of ChatMessages;
+    // Names of the active, admin-maintained BTP Destinations the "Connect to SAP
+    // System" dropdown should offer. Each name must match a real Destination
+    // configured in the BTP cockpit.
+    action getDestinations()                                                                        returns array of Destinations;
     // ── Chat actions ──────────────────────────────────────────────────────────
     action generateMultiModelResponse(prompt: String, category: String, extractedText: LargeString) returns array of ModelResponse;
 
@@ -80,8 +90,11 @@ service AIService {
 
     // Initial connection — accepts either a real sessionId or a client-generated
     // tempId when the DB session does not exist yet.
+    // `destinationName` must match an active row in the Destinations table /
+    // an actual BTP Destination — the backend resolves the real host from it,
+    // so the client never needs to know or type a raw system URL.
     action establishConnection(sessionId: String,
-                               url: String,
+                               destinationName: String,
                                user: String,
                                password: String,
                                client: String,

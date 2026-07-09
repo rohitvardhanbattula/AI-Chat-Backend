@@ -1,6 +1,7 @@
 'use strict';
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+const { getDestination } = require('@sap-cloud-sdk/connectivity');
 const path = require('path');
 
 // ── Structured logger ─────────────────────────────────────────────────────────
@@ -15,6 +16,10 @@ const path = require('path');
 //   CONNECT_LOGIN        – firing the login tool to verify credentials
 //   CONNECT_OK           – session fully established
 //   CONNECT_FAIL         – connection or login threw
+//   CONNECT_LOGIN_RETRY  – login hit a transient network error (ECONNRESET/
+//                          ETIMEDOUT/etc.), retrying once before failing
+//   CHECK_RETRY          – health-check ping hit a transient network error,
+//                          retrying once before reporting disconnected
 //   RECONNECT_CLOSE      – closing old transport before reconnect
 //   REMAP_OK             – tempId → realId migration succeeded
 //   REMAP_MISS           – tempId had no session (no-op)
@@ -48,6 +53,67 @@ function preview(val, maxLen = 300) {
     return str.length > maxLen ? str.slice(0, maxLen) + `…(+${str.length - maxLen} chars)` : str;
 }
 
+// ── Transient network error retry helper ────────────────────────────────────
+// The BTP Connectivity Proxy / Cloud Connector tunnel occasionally resets the
+// connection (ECONNRESET) if the on-prem backend is slow to answer the ADT
+// login handshake — the same login works fine outside the tunnel (e.g. via
+// Claude Desktop directly against the system), so this looks like tunnel
+// timeout behavior rather than a real auth/connectivity failure. A single
+// quick retry is usually enough, since the backend session/buffers are
+// already "warm" from the first attempt.
+const TRANSIENT_ERROR_PATTERNS = ['ECONNRESET', 'ETIMEDOUT', 'socket hang up', 'EPIPE'];
+
+function isTransientNetworkError(err) {
+    const msg = (err && err.message) || '';
+    return TRANSIENT_ERROR_PATTERNS.some(pattern => msg.includes(pattern));
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Call the MCP `login` tool, retrying once on a transient network error
+ * (ECONNRESET / ETIMEDOUT / socket hang up / EPIPE) before giving up.
+ *
+ * IMPORTANT: MCP tool-execution failures do NOT reject the promise — they
+ * resolve normally with `isError: true` and the error text buried in
+ * `result.content[0].text` (see the comment further down where this is
+ * consumed). So a transient failure has to be detected on the *resolved*
+ * result, not just via try/catch — a bare try/catch around callTool() alone
+ * would never see it and would never retry.
+ */
+async function callLoginWithRetry(client, sessionId, { maxRetries = 1, retryDelayMs = 500, logPrefix = 'CONNECT_LOGIN' } = {}) {
+    let attempt = 0;
+    for (;;) {
+        attempt++;
+        let result;
+        try {
+            result = await client.callTool({ name: 'login', arguments: {} });
+        } catch (err) {
+            const canRetry = attempt <= maxRetries && isTransientNetworkError(err);
+            if (!canRetry) throw err;
+            mcpLog('WARN', `${logPrefix}_RETRY`, {
+                sessionId, attempt, error: err.message, retryInMs: retryDelayMs, source: 'exception',
+            });
+            await sleep(retryDelayMs);
+            continue;
+        }
+
+        const resultText = result?.content?.[0]?.text;
+        const resolvedAsError = result?.isError && isTransientNetworkError({ message: resultText || '' });
+        if (resolvedAsError && attempt <= maxRetries) {
+            mcpLog('WARN', `${logPrefix}_RETRY`, {
+                sessionId, attempt, error: preview(resultText), retryInMs: retryDelayMs, source: 'isError result',
+            });
+            await sleep(retryDelayMs);
+            continue;
+        }
+
+        return result;
+    }
+}
+
 // ── Bridge manager ─────────────────────────────────────────────────────────────
 class AdtMcpBridgeManager {
     constructor() {
@@ -59,12 +125,59 @@ class AdtMcpBridgeManager {
     async connectWithCredentials(sessionId, credentials) {
         mcpLog('INFO', 'CONNECT_START', {
             sessionId,
-            url:      credentials.url,
+            destinationName: credentials.destinationName,
             user:     credentials.user,
             client:   credentials.client,
             language: credentials.language,
             // password intentionally omitted from logs
         });
+
+        // ── Resolve the BTP Destination ──────────────────────────────────────
+        // The client only ever sends a destination *name* (picked from the
+        // Destinations table / dropdown) — never a raw system URL. We resolve
+        // the actual host here via the bound Destination service.
+        let destination;
+        try {
+            destination = await getDestination({ destinationName: credentials.destinationName });
+        } catch (err) {
+            mcpLog('ERROR', 'CONNECT_FAIL', {
+                sessionId,
+                destinationName: credentials.destinationName,
+                reason: 'destination lookup threw',
+                error: err.message,
+            });
+            throw new Error(`Could not resolve destination "${credentials.destinationName}": ${err.message}`);
+        }
+
+        if (!destination || !destination.url) {
+            mcpLog('ERROR', 'CONNECT_FAIL', {
+                sessionId,
+                destinationName: credentials.destinationName,
+                reason: 'destination not found or has no url',
+            });
+            throw new Error(
+                `Destination "${credentials.destinationName}" was not found (or has no URL). ` +
+                `Check that it exists in the BTP cockpit under Connectivity > Destinations and that the name matches exactly.`
+            );
+        }
+
+        // For OnPremise-proxied destinations, a raw resolved URL isn't enough to
+        // reach the system — the request has to go through the Connectivity
+        // Proxy / Cloud Connector tunnel. The spawned MCP process is told to use
+        // `DestinationProxyHttpClient` (which re-resolves this same destination
+        // and routes through that tunnel) instead of connecting to SAP_URL
+        // directly. Internet-proxied destinations are simple and reachable
+        // directly, so they keep using the plain SAP_URL path.
+        const useDestinationProxy = destination.proxyType === 'OnPremise';
+        if (useDestinationProxy) {
+            mcpLog('INFO', 'CONNECT_START', {
+                sessionId,
+                destinationName: credentials.destinationName,
+                info: 'OnPremise destination — routing through Connectivity Proxy / Cloud Connector tunnel',
+            });
+        }
+
+        const url = destination.url;
 
         // Close and cleanup existing session if redefining
         if (this.sessions.has(sessionId)) {
@@ -88,11 +201,13 @@ class AdtMcpBridgeManager {
 
         const env = {
             ...process.env,
-            SAP_URL:      credentials.url,
-            SAP_USER:     credentials.user,
-            SAP_PASSWORD: credentials.password,
-            SAP_CLIENT:   credentials.client,
-            SAP_LANGUAGE: credentials.language
+            SAP_URL:                  url,
+            SAP_USER:                 credentials.user,
+            SAP_PASSWORD:             credentials.password,
+            SAP_CLIENT:               credentials.client,
+            SAP_LANGUAGE:             credentials.language,
+            SAP_USE_DESTINATION_PROXY: String(useDestinationProxy),
+            SAP_DESTINATION_NAME:      credentials.destinationName,
         };
 
         const transport = new StdioClientTransport({ command: 'node', args: [serverPath], env });
@@ -126,7 +241,7 @@ class AdtMcpBridgeManager {
         const loginStart = Date.now();
         let loginResult;
         try {
-            loginResult = await client.callTool({ name: 'login', arguments: {} });
+            loginResult = await callLoginWithRetry(client, sessionId, { logPrefix: 'CONNECT_LOGIN' });
         } catch (err) {
             this.sessions.delete(sessionId);
             mcpLog('ERROR', 'CONNECT_FAIL', {
@@ -220,7 +335,7 @@ class AdtMcpBridgeManager {
 
         const pingStart = Date.now();
         try {
-            const result = await session.client.callTool({ name: 'login', arguments: {} });
+            const result = await callLoginWithRetry(session.client, sessionId, { logPrefix: 'CHECK' });
             const text   = result?.content?.[0]?.text || 'OK';
 
             // As in connectWithCredentials: a failed login resolves with

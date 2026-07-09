@@ -40,3 +40,8 @@ entity RefreshTokens : cuid, managed {
     expiresAt : Timestamp;
     revoked   : Boolean default false;
 }
+entity Destinations : cuid, managed {
+    name        : String(200) not null; // must match the BTP Destination name exactly
+    description : String(255);          // free-text, shown in the dropdown as a hint
+    isActive    : Boolean default true;  // inactive destinations are hidden from the dropdown
+}

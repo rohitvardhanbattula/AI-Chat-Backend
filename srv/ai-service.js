@@ -62,6 +62,14 @@ module.exports = cds.service.impl(async function () {
             .orderBy('createdAt asc');
     });
 
+    // ── Destinations dropdown source ────────────────────────────────────────
+    this.on('getDestinations', async (req) => {
+        await requireJwt(req);
+        return await SELECT.from('sap.aigateway.Destinations')
+            .where({ isActive: true })
+            .orderBy('name asc');
+    });
+
     this.on('deleteSession', async (req) => {
         await requireJwt(req);
         const { sessionId } = req.data;
@@ -132,14 +140,14 @@ module.exports = cds.service.impl(async function () {
     // ── SAP ADT MCP — initial connection ──────────────────────────────────
     this.on('establishConnection', async (req) => {
         await requireJwt(req);
-        const { sessionId, url, user, password, client, language } = req.data;
-        console.log(`[AIService] establishConnection | sessionId=${sessionId} url=${url} user=${user} client=${client} language=${language}`);
-        if (!sessionId || !url || !user || !password) {
-            return req.reject(400, 'sessionId, url, user and password are required.');
+        const { sessionId, destinationName, user, password, client, language } = req.data;
+        console.log(`[AIService] establishConnection | sessionId=${sessionId} destinationName=${destinationName} user=${user} client=${client} language=${language}`);
+        if (!sessionId || !destinationName || !user || !password) {
+            return req.reject(400, 'sessionId, destinationName, user and password are required.');
         }
         try {
             const mcpBridge = require('./lib/abap/adt-mcp-bridge');
-            const result    = await mcpBridge.connectWithCredentials(sessionId, { url, user, password, client, language });
+            const result    = await mcpBridge.connectWithCredentials(sessionId, { destinationName, user, password, client, language });
             console.log(`[AIService] establishConnection OK | sessionId=${sessionId} result="${result}"`);
             return result;
         } catch (err) {

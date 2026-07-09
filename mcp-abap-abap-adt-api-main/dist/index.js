@@ -56,11 +56,31 @@ class AbapAdtServer extends index_js_1.Server {
                 tools: {},
             },
         });
-        const missingVars = ['SAP_URL', 'SAP_USER', 'SAP_PASSWORD'].filter(v => !process.env[v]);
+        const missingVars = ['SAP_USER', 'SAP_PASSWORD'].filter(v => !process.env[v]);
         if (missingVars.length > 0) {
             throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
         }
-        this.adtClient = new abap_adt_api_1.ADTClient(process.env.SAP_URL, process.env.SAP_USER, process.env.SAP_PASSWORD, process.env.SAP_CLIENT, process.env.SAP_LANGUAGE);
+        if (process.env.SAP_USE_DESTINATION_PROXY === 'true') {
+            // OnPremise destination: route through the BTP Connectivity Proxy /
+            // Cloud Connector tunnel instead of a direct network call, so the
+            // system is reachable from Cloud Foundry / BAS without a VPN.
+            if (!process.env.SAP_DESTINATION_NAME) {
+                throw new Error('Missing required environment variable: SAP_DESTINATION_NAME');
+            }
+            const { DestinationProxyHttpClient } = require('./destination-proxy-http-client.js');
+            const httpClient = new DestinationProxyHttpClient(process.env.SAP_DESTINATION_NAME, {
+                username: process.env.SAP_USER,
+                password: process.env.SAP_PASSWORD,
+            });
+            this.adtClient = new abap_adt_api_1.ADTClient(httpClient, process.env.SAP_USER, process.env.SAP_PASSWORD, process.env.SAP_CLIENT, process.env.SAP_LANGUAGE);
+        } else {
+            // Internet-proxied (or directly reachable) destination: the resolved
+            // URL can be hit directly, no Cloud Connector tunnel needed.
+            if (!process.env.SAP_URL) {
+                throw new Error('Missing required environment variable: SAP_URL');
+            }
+            this.adtClient = new abap_adt_api_1.ADTClient(process.env.SAP_URL, process.env.SAP_USER, process.env.SAP_PASSWORD, process.env.SAP_CLIENT, process.env.SAP_LANGUAGE);
+        }
         this.adtClient.stateful = abap_adt_api_1.session_types.stateful;
         // Initialize handlers
         this.authHandlers = new AuthHandlers_js_1.AuthHandlers(this.adtClient);
