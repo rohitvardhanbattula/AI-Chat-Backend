@@ -1,11 +1,13 @@
 'use strict';
 const { callGemini, callClaude, callGPT4o, callSAPGenAIHub, resolveClaudeModel } = require('../ai/llm-provider');
 const { performValidation } = require('../abap/validation');
-const { buildPromptWithContext, buildRetryPrompt, buildFinalReport, GLOBAL_SYSTEM_INSTRUCTION } = require('../utils/helpers');
+const { buildPromptWithContext, buildRetryPrompt, buildFinalReport, GLOBAL_SYSTEM_INSTRUCTION, GENERAL_SYSTEM_INSTRUCTION } = require('../utils/helpers');
 const { MAX_RETRIES } = require('../utils/constants');
 async function generateWithValidation(sessionId, modelId, prompt, history, category, functionalSpec) {
     const normalizedModelId = (modelId || '').toLowerCase();
+    const isGeneral = (category || '').toString().toLowerCase() === 'general';
     const claudeModel = resolveClaudeModel(category);
+    const nonClaudeSystemInstruction = isGeneral ? GENERAL_SYSTEM_INSTRUCTION : GLOBAL_SYSTEM_INSTRUCTION;
     let attempt = 0;
     let currentPrompt = normalizedModelId === 'claude' ? prompt : buildPromptWithContext(prompt, functionalSpec);
     let internalHistory = [...history];
@@ -13,24 +15,30 @@ async function generateWithValidation(sessionId, modelId, prompt, history, categ
     const callModel = async (p, h) => {
         switch (normalizedModelId) {
             case 'gemini': {
-                const res = await callGemini(sessionId, p, GLOBAL_SYSTEM_INSTRUCTION, h);
+                const res = await callGemini(sessionId, p, nonClaudeSystemInstruction, h);
                 return res.error ? 'model is not available at the moment' : res.content;
             }
             case 'claude': {
                 
-                const res = await callClaude(sessionId, p, h, claudeModel, functionalSpec);
+                const res = await callClaude(sessionId, p, h, claudeModel, functionalSpec, category);
                 return res.error ? 'model is not available at the moment' : res.content;
             }
             case 'gpt4o': {
-                const res = await callGPT4o(sessionId, p, GLOBAL_SYSTEM_INSTRUCTION, h);
+                const res = await callGPT4o(sessionId, p, nonClaudeSystemInstruction, h);
                 return res.error ? 'model is not available at the moment' : res.content;
             }
             default: {
-                const res = await callSAPGenAIHub(sessionId, p, GLOBAL_SYSTEM_INSTRUCTION, h);
+                const res = await callSAPGenAIHub(sessionId, p, nonClaudeSystemInstruction, h);
                 return res.error ? 'model is not available at the moment' : res.content;
             }
         }
     };
+
+    // 'general' category is a plain conversational/tool-use flow — skip ABAP validation & retry loop entirely.
+    if (isGeneral) {
+        const generatedText = await callModel(currentPrompt, internalHistory);
+        return generatedText;
+    }
 
     while (attempt < MAX_RETRIES) {
         //console.log("entry");

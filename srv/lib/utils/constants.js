@@ -10,6 +10,11 @@ const GLOBAL_SYSTEM_INSTRUCTION =
     '4. NEVER delete functionality to avoid errors — provide the modern equivalent. ' +
     '5. NO PSEUDO-CODE. Write executable, active ABAP code only.';
 
+const GENERAL_SYSTEM_INSTRUCTION =
+    'You have access to tools for the connected SAP system. Use them to answer the user\'s request, ' +
+    'then explain the result in plain language. Do not force output into ABAP code blocks unless the ' +
+    'user explicitly asks you to generate code.';
+
 // ── Limits ────────────────────────────────────────────────────────────────────
 const MAX_RETRIES              = 2;
 const MAX_CHATS_PER_USER       = 10;
@@ -112,7 +117,7 @@ const SAP_ALWAYS_VALID_OBJECTS = new Set([
 ]);
 
 module.exports = {
-    GLOBAL_SYSTEM_INSTRUCTION,
+    GLOBAL_SYSTEM_INSTRUCTION, GENERAL_SYSTEM_INSTRUCTION,
     MAX_RETRIES, MAX_CHATS_PER_USER, MAX_PROMPTS_PER_SESSION,
     MAX_HISTORY_MESSAGES, CHARS_PER_TOKEN, MAX_INPUT_TOKENS,
     GPT_MAX_INPUT_TOKENS, CLAUDE_MAX_INPUT_TOKENS,

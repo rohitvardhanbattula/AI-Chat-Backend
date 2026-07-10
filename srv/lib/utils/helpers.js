@@ -2,7 +2,7 @@
 const { getDestination } = require('@sap-cloud-sdk/connectivity');
 const {
     MAX_INPUT_TOKENS, CHARS_PER_TOKEN, MAX_HISTORY_MESSAGES,
-    CLAUDE_MODEL_COMPLEX, CLAUDE_MODEL_SIMPLE, GLOBAL_SYSTEM_INSTRUCTION,
+    CLAUDE_MODEL_COMPLEX, CLAUDE_MODEL_SIMPLE, GLOBAL_SYSTEM_INSTRUCTION, GENERAL_SYSTEM_INSTRUCTION,
     GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
     CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS, MAX_OUTPUT_TOKENS_CLAUDE,GENHUB_GPT_DEPLOYMENT
 } = require('./constants');
@@ -68,8 +68,10 @@ function buildPromptWithContext(prompt, functionalSpec) {
     return `${prompt}\n\nFunctional Specification Context:\n${truncateSpec(functionalSpec, prompt.length + 1000)}`;
 }
 
-function buildClaudeSystemBlocks(functionalSpec) {
-    const blocks = [{ type: 'text', text: GLOBAL_SYSTEM_INSTRUCTION, cache_control: { type: 'ephemeral' } }];
+function buildClaudeSystemBlocks(functionalSpec, category) {
+    const isGeneral = (category || '').toString().toLowerCase() === 'general';
+    const systemText = isGeneral ? GENERAL_SYSTEM_INSTRUCTION : GLOBAL_SYSTEM_INSTRUCTION;
+    const blocks = [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }];
     if (functionalSpec) {
         blocks.push({
             type:          'text',
@@ -125,7 +127,7 @@ function buildFinalReport(generatedText, feedback) {
 module.exports = {
     getCachedDestination, trimContext, truncateSpec, buildPromptWithContext,
     buildClaudeSystemBlocks, resolveClaudeModel, buildRetryPrompt, buildFinalReport,
-    GLOBAL_SYSTEM_INSTRUCTION,
+    GLOBAL_SYSTEM_INSTRUCTION, GENERAL_SYSTEM_INSTRUCTION,
     GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
     CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS, MAX_OUTPUT_TOKENS_CLAUDE,
     CLAUDE_MODEL_SIMPLE, CLAUDE_MODEL_COMPLEX,GENHUB_GPT_DEPLOYMENT

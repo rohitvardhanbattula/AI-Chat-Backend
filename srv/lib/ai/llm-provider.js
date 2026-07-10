@@ -179,7 +179,11 @@ function applyCacheBreakpoint(history) {
 
 // Converts MCP tools to Anthropic tool format
 function mcpToolsToClaudeFormat(tools) {
-    return tools.map(t => ({
+    const uniqueTools = [
+        ...new Map(tools.map(tool => [tool.name, tool])).values()
+    ];
+
+    return uniqueTools.map(t => ({
         name: t.name,
         description: t.description || '',
         input_schema: t.parameters || { type: 'object', properties: {} }
@@ -231,7 +235,7 @@ async function callClaudeViaGenHubInner(functionalSpec) {
 }
 
 // Inner provider fn used by agenticToolLoop for Claude via direct API key
-async function callClaudeViaApiKeyInner(model, functionalSpec, apikey) {
+async function callClaudeViaApiKeyInner(model, functionalSpec, apikey, category) {
     return async function(prompt, systemInstruction, history, tools) {
         const cleanHistory = sanitiseHistoryForClaude(history);
         const { history: safeHistory, prompt: safePrompt } = trimContext(
@@ -239,7 +243,7 @@ async function callClaudeViaApiKeyInner(model, functionalSpec, apikey) {
         );
 
         const messages     = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
-        const systemBlocks = require('../utils/helpers').buildClaudeSystemBlocks(functionalSpec);
+        const systemBlocks = require('../utils/helpers').buildClaudeSystemBlocks(functionalSpec, category);
 
         const body = { model, max_tokens: MAX_OUTPUT_TOKENS_CLAUDE, system: systemBlocks, messages };
         if (tools.length > 0) {
@@ -275,11 +279,16 @@ async function callClaudeViaApiKeyInner(model, functionalSpec, apikey) {
     };
 }
 
-async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null) {
+async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_SIMPLE, functionalSpec = null, category = null) {
     const start = Date.now();
+    const isGeneral = (category || '').toString().toLowerCase() === 'general';
+    const systemInstruction = isGeneral
+        ? require('../utils/helpers').GENERAL_SYSTEM_INSTRUCTION
+        : GLOBAL_SYSTEM_INSTRUCTION;
+
     try {
         const providerFn = await callClaudeViaGenHubInner(functionalSpec);
-        const content    = await agenticToolLoop(sessionId, prompt, GLOBAL_SYSTEM_INSTRUCTION, history, providerFn);
+        const content    = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
         return { modelId: 'claude', content, latency: Date.now() - start, model: 'opus-genhub' };
     } catch (hubErr) {
         console.warn('callClaude: GenAI Hub failed, falling back to API key:', hubErr?.message);
@@ -288,8 +297,8 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
             const apikey  = dest.originalProperties?.apikey;
             if (!apikey) throw new Error('Claude API key destination is not configured correctly.');
 
-            const providerFn = await callClaudeViaApiKeyInner(model, functionalSpec, apikey);
-            const content    = await agenticToolLoop(sessionId, prompt, GLOBAL_SYSTEM_INSTRUCTION, history, providerFn);
+            const providerFn = await callClaudeViaApiKeyInner(model, functionalSpec, apikey, category);
+            const content    = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
             return { modelId: 'claude', content, latency: Date.now() - start, model };
         } catch (fallbackErr) {
             console.error('callClaude: fallback also failed:', fallbackErr?.message);
@@ -302,13 +311,14 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
 
 // Converts MCP tools to OpenAI function-calling format
 function mcpToolsToGPTFormat(tools) {
-    return tools.map(t => ({
-        type: 'function',
-        function: {
-            name: t.name,
-            description: t.description || '',
-            parameters: t.parameters || { type: 'object', properties: {} }
-        }
+    const uniqueTools = [
+        ...new Map(tools.map(tool => [tool.name, tool])).values()
+    ];
+
+    return uniqueTools.map(t => ({
+        name: t.name,
+        description: t.description || '',
+        input_schema: t.parameters || { type: 'object', properties: {} }
     }));
 }
 
