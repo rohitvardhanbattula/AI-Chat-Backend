@@ -7,6 +7,7 @@ const { MAX_PROMPTS_PER_SESSION } = require('./lib/utils/constants');
 const { callGemini, callGPT4o, callSAPGenAIHub, callClaude, resolveClaudeModel } = require('./lib/ai/llm-provider');
 const { buildPromptWithContext, GLOBAL_SYSTEM_INSTRUCTION } = require('./lib/utils/helpers');
 const { verifyAccessToken, purgeExpiredTokens, ConfigError } = require('./lib/auth/jwt');
+const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
 
 const MODEL_IDS = ['gemini', 'gpt4o', 'perplexity', 'claude'];
 
@@ -20,8 +21,8 @@ function sanitise(val, maxLen = 500_000) {
 async function requireJwt(req) {
     const headers = req._.req?.headers;
     const token = headers?.['x-custom-auth'] ||
-                  (headers?.authorization || '').replace('Bearer ', '') ||
-                  null;
+        (headers?.authorization || '').replace('Bearer ', '') ||
+        null;
 
     if (!token) return req.reject(401, 'Authentication required.');
 
@@ -46,6 +47,9 @@ setInterval(() => {
 
 // ── Service implementation ────────────────────────────────────────────────────
 module.exports = cds.service.impl(async function () {
+
+
+
     this.on('getChatSessions', async (req) => {
         await requireJwt(req);
         const { userId } = req.user;
@@ -93,34 +97,38 @@ module.exports = cds.service.impl(async function () {
         }
 
         const crypto = require('crypto');
-        const now    = new Date().toISOString();
-        const ID     = crypto.randomUUID();
+        const now = new Date().toISOString();
+        const ID = crypto.randomUUID();
 
         await INSERT.into('sap.aigateway.ChatSessions').entries({
             ID, userId,
-            title:         title.slice(0, 100),
+            title: title.slice(0, 100),
             selectedModel,
             functionalspec: functionalspec ?? null,
-            createdAt:  now, createdBy:  userId,
+            createdAt: now, createdBy: userId,
             modifiedAt: now, modifiedBy: userId
         });
 
         if (messages && messages.length > 0) {
             const messageEntries = messages.map((m, i) => ({
-                ID:         crypto.randomUUID(),
+                ID: crypto.randomUUID(),
                 session_ID: ID,
-                role:       m.role,
-                content:    m.content,
-                modelId:    m.modelId || selectedModel,
-                createdAt:  new Date(Date.now() + i).toISOString(),
-                createdBy:  userId,
+                role: m.role,
+                content: m.content,
+                modelId: m.modelId || selectedModel,
+                createdAt: new Date(Date.now() + i).toISOString(),
+                createdBy: userId,
                 modifiedAt: now,
                 modifiedBy: userId
             }));
             await INSERT.into('sap.aigateway.ChatMessages').entries(messageEntries);
         }
 
-        return await SELECT.one.from('sap.aigateway.ChatSessions').where({ ID });
+        const session = await SELECT.one.from('sap.aigateway.ChatSessions').where({ ID });
+        session.messages = (messages && messages.length > 0)
+            ? await SELECT.from('sap.aigateway.ChatMessages').where({ session_ID: ID })
+            : [];
+        return session;
     });
 
     this.on('renameSession', async (req) => {
@@ -131,11 +139,11 @@ module.exports = cds.service.impl(async function () {
     });
 
     // ── Auth — no JWT required ─────────────────────────────────────────────
-    this.on('register',      AuthService.register);
-    this.on('verifyOTP',     AuthService.verifyOTP);
-    this.on('login',         AuthService.login);
-    this.on('refreshToken',  AuthService.refreshToken);
-    this.on('logout',        AuthService.logout);
+    this.on('register', AuthService.register);
+    this.on('verifyOTP', AuthService.verifyOTP);
+    this.on('login', AuthService.login);
+    this.on('refreshToken', AuthService.refreshToken);
+    this.on('logout', AuthService.logout);
 
     // ── SAP ADT MCP — initial connection ──────────────────────────────────
     this.on('establishConnection', async (req) => {
@@ -147,7 +155,7 @@ module.exports = cds.service.impl(async function () {
         }
         try {
             const mcpBridge = require('./lib/abap/adt-mcp-bridge');
-            const result    = await mcpBridge.connectWithCredentials(sessionId, { destinationName, user, password, client, language });
+            const result = await mcpBridge.connectWithCredentials(sessionId, { destinationName, user, password, client, language });
             console.log(`[AIService] establishConnection OK | sessionId=${sessionId} result="${result}"`);
             return result;
         } catch (err) {
@@ -189,7 +197,7 @@ module.exports = cds.service.impl(async function () {
         }
         try {
             const mcpBridge = require('./lib/abap/adt-mcp-bridge');
-            const status    = await mcpBridge.checkConnection(sessionId);
+            const status = await mcpBridge.checkConnection(sessionId);
             console.log(`[AIService] checkConnection result | sessionId=${sessionId} connected=${status.connected} message="${status.message}"`);
             return status;
         } catch (err) {
@@ -210,12 +218,12 @@ module.exports = cds.service.impl(async function () {
     // ── Multi-model comparison (non-streaming, used as fallback) ───────────
     this.on('generateMultiModelResponse', async (req) => {
         await requireJwt(req);
-        const prompt        = sanitise(req.data.prompt, 50_000);
-        const category      = sanitise(req.data.category, 100);
+        const prompt = sanitise(req.data.prompt, 50_000);
+        const category = sanitise(req.data.category, 100);
         const extractedText = sanitise(req.data.extractedText, 200_000) || null;
         if (!prompt) return req.reject(400, 'prompt is required.');
 
-        const claudeModel       = resolveClaudeModel(category);
+        const claudeModel = resolveClaudeModel(category);
         const promptWithContext = buildPromptWithContext(prompt, extractedText);
 
         const results = await Promise.allSettled([
@@ -241,7 +249,7 @@ module.exports = cds.service.impl(async function () {
     // ── Streaming (no session — comparison screen) ─────────────────────────
     this.generateStreamNoSession = async function (modelId, prompt, category, extractedText, onChunk) {
         const safePrompt = sanitise(prompt, 50_000);
-        const safeSpec   = sanitise(extractedText, 200_000) || null;
+        const safeSpec = sanitise(extractedText, 200_000) || null;
         try {
             const output = await generateWithValidation(null, modelId, safePrompt, [], category, safeSpec);
             onChunk(output);
@@ -253,9 +261,9 @@ module.exports = cds.service.impl(async function () {
 
     // ── Streaming (with session — active chat) ─────────────────────────────
     this.generateStream = async function (sessionId, modelId, prompt, category, extractedText, onChunk) {
-        const crypto     = require('crypto');
+        const crypto = require('crypto');
         const safePrompt = sanitise(prompt, 50_000);
-        const safeSpec   = sanitise(extractedText, 200_000) || null;
+        const safeSpec = sanitise(extractedText, 200_000) || null;
 
         const [session, messagesData] = await Promise.all([
             SELECT.one.from('sap.aigateway.ChatSessions').where({ ID: sessionId }),
@@ -272,13 +280,13 @@ module.exports = cds.service.impl(async function () {
         }
 
         const functionalSpec = safeSpec || session.functionalspec || null;
-        const dbHistory      = messagesData.map(m => ({ role: m.role, content: m.content }));
-        const latencyStart   = Date.now();
+        const dbHistory = messagesData.map(m => ({ role: m.role, content: m.content }));
+        const latencyStart = Date.now();
 
         try {
-            const output  = await generateWithValidation(sessionId, modelId, safePrompt, dbHistory, category, functionalSpec);
+            const output = await generateWithValidation(sessionId, modelId, safePrompt, dbHistory, category, functionalSpec);
             const latency = Date.now() - latencyStart;
-            const now     = new Date().toISOString();
+            const now = new Date().toISOString();
 
             await INSERT.into('sap.aigateway.ChatMessages').entries([
                 {
@@ -298,9 +306,9 @@ module.exports = cds.service.impl(async function () {
             onChunk(output);
         } catch (err) {
             console.error('[generateStream]', err?.message);
-            const errMsg  = 'model is not available at the moment';
+            const errMsg = 'model is not available at the moment';
             const latency = Date.now() - latencyStart;
-            const now     = new Date().toISOString();
+            const now = new Date().toISOString();
             onChunk(errMsg);
 
             await INSERT.into('sap.aigateway.ChatMessages').entries([

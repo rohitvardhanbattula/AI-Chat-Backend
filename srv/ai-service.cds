@@ -87,7 +87,7 @@ service AIService {
     action validateABAPCode(code: LargeString)                                                      returns array of String;
 
     // ── SAP ADT connection actions ────────────────────────────────────────────
-
+    function ping() returns String;
     // Initial connection — accepts either a real sessionId or a client-generated
     // tempId when the DB session does not exist yet.
     // `destinationName` must match an active row in the Destinations table /

@@ -141,38 +141,75 @@ async function callGemini(sessionId, prompt, systemInstruction, history = []) {
 
 // ─── Claude ───────────────────────────────────────────────────────────────────
 function sanitiseHistoryForClaude(history) {
-    // Claude requires strictly alternating user/assistant turns.
-    // Tool-result turns from the agentic loop are serialised as user messages
-    // so the conversation stays valid when replayed through trimContext.
-    return history.map(m => {
-        if (m.role === 'tool') {
-            // Flatten tool results into a user-turn text block
-            const resultText = m.results
-                .map(r => `[Tool: ${r.name}]\n${r.result}`)
-                .join('\n\n');
-            return { role: 'user', content: resultText };
-        }
-        if (m.role === 'assistant' && m.toolCalls) {
-            // Represent the assistant's tool-call decision as plain text
-            const callText = m.toolCalls
-                .map(tc => `[Calling tool: ${tc.name} with args: ${JSON.stringify(tc.arguments)}]`)
-                .join('\n');
-            return { role: 'assistant', content: (m.content ? m.content + '\n' : '') + callText };
-        }
-        if (m.role === 'user' || m.role === 'assistant') {
-            return { role: m.role, content: m.content || '' };
-        }
-        return null;
-    }).filter(Boolean);
-}
+    const messages = [];
 
+    for (const m of history) {
+        if (m.role === 'assistant' && m.toolCalls) {
+            messages.push({
+                role: 'assistant',
+                content: m.toolCalls.map(tc => ({
+                    type: 'tool_use',
+                    id: tc.id,
+                    name: tc.name,
+                    input: tc.arguments
+                }))
+            });
+        } else if (m.role === 'tool') {
+            messages.push({
+                role: 'user',
+                content: m.results.map(r => ({
+                    type: 'tool_result',
+                    tool_use_id: r.toolCallId,
+                    content: typeof r.result === 'string'
+                        ? r.result
+                        : JSON.stringify(r.result)
+                }))
+            });
+        } else if (m.role === 'user' || m.role === 'assistant') {
+            messages.push({
+                role: m.role,
+                content: m.content || ''
+            });
+        }
+    }
+
+    return messages;
+}
 function applyCacheBreakpoint(history) {
     if (!history.length) return history;
+
     return history.map((m, idx) => {
         if (idx !== history.length - 1) return m;
+
+        // Already structured content (tool_use/tool_result)
+        if (Array.isArray(m.content)) {
+            return {
+                ...m,
+                content: m.content.map((block, i) => {
+                    // Only cache text blocks
+                    if (block.type === 'text') {
+                        return {
+                            ...block,
+                            cache_control: i === m.content.length - 1
+                                ? { type: 'ephemeral' }
+                                : undefined
+                        };
+                    }
+                    return block;
+                })
+            };
+        }
+
+        // Plain text message
         return {
             role: m.role,
-            content: [{ type: 'text', text: m.content || '', cache_control: { type: 'ephemeral' } }]
+            content: [
+                {
+                    type: 'text',
+                    text: m.content || '',
+                    cache_control: { type: 'ephemeral' }
+                }
+            ]
         };
     });
 }
