@@ -10,6 +10,7 @@ entity Users : cuid, managed {
     isVerified   : Boolean default false;
     failedLogins : Integer  default 0;
     lockedUntil  : Timestamp;
+    promptCount  : Integer  default 0; // total number of prompts sent by this user
 }
 
 entity ChatSessions : cuid, managed {

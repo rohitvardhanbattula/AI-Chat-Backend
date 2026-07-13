@@ -114,11 +114,58 @@ async function callLoginWithRetry(client, sessionId, { maxRetries = 1, retryDela
     }
 }
 
+// ── Session lifecycle limits ─────────────────────────────────────────────────
+// Each session holds a live spawned child process (StdioClientTransport) in
+// memory on THIS instance. Left unbounded, abandoned sessions (user closes
+// the tab without disconnecting) accumulate child processes until the app
+// OOMs or runs out of file descriptors. These two knobs put a hard ceiling
+// on that: a cap on concurrent sessions, and an idle sweep that kills
+// sessions nobody has touched in a while. Both are overridable via env vars
+// so they can be tuned per-environment without a redeploy.
+const MAX_MCP_SESSIONS      = Number(process.env.MCP_MAX_SESSIONS) || 25;
+const SESSION_IDLE_TIMEOUT_MS = Number(process.env.MCP_SESSION_IDLE_TIMEOUT_MS) || 30 * 60 * 1000; // 30 min
+const IDLE_SWEEP_INTERVAL_MS  = 5 * 60 * 1000; // check every 5 min
+
 // ── Bridge manager ─────────────────────────────────────────────────────────────
 class AdtMcpBridgeManager {
     constructor() {
         // Store in-memory connections mapped by sessionId
         this.sessions = new Map();
+
+        // Periodically close sessions that have been idle too long.
+        this._sweepTimer = setInterval(() => this._sweepIdleSessions(), IDLE_SWEEP_INTERVAL_MS);
+        if (typeof this._sweepTimer.unref === 'function') this._sweepTimer.unref();
+    }
+
+    // ── Internal: close + remove a session's transport safely ───────────────
+    async _closeAndDelete(sessionId, session, reason) {
+        try {
+            if (session?.transport && typeof session.transport.close === 'function') {
+                await session.transport.close();
+            }
+        } catch (e) {
+            mcpLog('WARN', 'SESSION_CLOSE_FAIL', { sessionId, reason, error: e.message });
+        }
+        this.sessions.delete(sessionId);
+        mcpLog('INFO', 'SESSION_CLOSED', { sessionId, reason });
+    }
+
+    // ── Internal: idle sweep, called on a timer ──────────────────────────────
+    _sweepIdleSessions() {
+        const now = Date.now();
+        for (const [sessionId, session] of this.sessions.entries()) {
+            const idleFor = now - (session.lastActivity || 0);
+            if (idleFor > SESSION_IDLE_TIMEOUT_MS) {
+                mcpLog('INFO', 'SESSION_IDLE_EVICT', { sessionId, idleForMs: idleFor });
+                this._closeAndDelete(sessionId, session, 'idle-timeout').catch(() => {});
+            }
+        }
+    }
+
+    // ── Internal: bump last-activity timestamp on any use ────────────────────
+    _touch(sessionId) {
+        const session = this.sessions.get(sessionId);
+        if (session) session.lastActivity = Date.now();
     }
 
     // ── Connect ────────────────────────────────────────────────────────────
@@ -182,15 +229,20 @@ class AdtMcpBridgeManager {
         // Close and cleanup existing session if redefining
         if (this.sessions.has(sessionId)) {
             mcpLog('INFO', 'RECONNECT_CLOSE', { sessionId, reason: 'replacing existing session' });
-            const existing = this.sessions.get(sessionId);
-            try {
-                if (existing.transport && typeof existing.transport.close === 'function') {
-                    await existing.transport.close();
-                }
-            } catch (e) {
-                mcpLog('WARN', 'RECONNECT_CLOSE', { sessionId, error: e.message });
-            }
-            this.sessions.delete(sessionId);
+            await this._closeAndDelete(sessionId, this.sessions.get(sessionId), 'reconnect');
+        } else if (this.sessions.size >= MAX_MCP_SESSIONS) {
+            // Only a genuinely new session counts against the cap — reconnects
+            // to an existing sessionId are always allowed since they net zero.
+            mcpLog('ERROR', 'CONNECT_FAIL', {
+                sessionId,
+                reason: 'session cap reached',
+                activeSessions: this.sessions.size,
+                cap: MAX_MCP_SESSIONS,
+            });
+            throw new Error(
+                `Too many active SAP connections right now (${this.sessions.size}/${MAX_MCP_SESSIONS}). ` +
+                `Please try again shortly, or ask an idle user to disconnect.`
+            );
         }
 
         const client = new Client(
@@ -227,7 +279,7 @@ class AdtMcpBridgeManager {
         // });
 
         // Store session before login so executeTool can use it
-        this.sessions.set(sessionId, { client, transport, availableTools });
+        this.sessions.set(sessionId, { client, transport, availableTools, lastActivity: Date.now() });
 
         // Connection is only considered successful when the login tool succeeds.
         const hasLogin = availableTools.find(t => t.name === 'login');
@@ -292,13 +344,7 @@ class AdtMcpBridgeManager {
 
         if (this.sessions.has(newId)) {
             mcpLog('WARN', 'REMAP_COLLISION', { tempId, newId, action: 'closing existing newId session' });
-            const existing = this.sessions.get(newId);
-            try {
-                if (existing.transport && typeof existing.transport.close === 'function') {
-                    existing.transport.close().catch(() => {});
-                }
-            } catch (_) { /* best effort */ }
-            this.sessions.delete(newId);
+            this._closeAndDelete(newId, this.sessions.get(newId), 'remap-collision').catch(() => {});
         }
 
         const session = this.sessions.get(tempId);
@@ -337,6 +383,9 @@ class AdtMcpBridgeManager {
         try {
             const result = await callLoginWithRetry(session.client, sessionId, { logPrefix: 'CHECK' });
             const text   = result?.content?.[0]?.text || 'OK';
+            // NOTE: intentionally NOT touching lastActivity here — checkConnection
+            // is a passive health-check the UI may poll on a timer, and treating
+            // polling as "activity" would defeat the idle-eviction sweep entirely.
 
             // As in connectWithCredentials: a failed login resolves with
             // isError:true rather than rejecting. Treat that as disconnected.
@@ -386,6 +435,8 @@ class AdtMcpBridgeManager {
             tool: name,
             args: preview(args),   // args may contain code snippets — truncate
         });
+
+        this._touch(sessionId); // real usage — resets the idle-eviction clock
 
         const callStart = Date.now();
         try {

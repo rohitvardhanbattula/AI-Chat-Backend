@@ -101,6 +101,14 @@ module.exports = cds.service.impl(async function () {
         const { title, selectedModel, functionalspec, messages } = req.data;
         const { MAX_CHATS_PER_USER } = require('./lib/utils/constants');
 
+        // Lock this user's row for the rest of the transaction. Two concurrent
+        // createSession calls for the same user will now serialize here instead
+        // of both reading the same pre-insert count and both slipping past the
+        // limit — the second call blocks until the first commits (releasing the
+        // lock), by which point its own count query sees the first call's insert.
+        // No-op on sqlite (dev); enforced as a real row lock on HANA (prod).
+        await SELECT.one.from('sap.aigateway.Users').where({ ID: userId }).forUpdate();
+
         const [{ count }] = await SELECT
             .from('sap.aigateway.ChatSessions')
             .columns('count(*) as count')
@@ -283,21 +291,45 @@ module.exports = cds.service.impl(async function () {
         const safeSpec = sanitise(extractedText, 200_000) || null;
         incrementPromptCount(userId); // fire-and-forget
 
-        const [session, messagesData] = await Promise.all([
-            SELECT.one.from('sap.aigateway.ChatSessions').where({ ID: sessionId }),
-            SELECT.from('sap.aigateway.ChatMessages')
-                .where({ session_ID: sessionId })
-                .orderBy('createdAt asc')
-        ]);
+        let session, messagesData;
+        const reservedAt = new Date().toISOString();
 
-        if (!session) throw new Error('Session not found.');
+        // ── Atomically reserve a prompt "slot" ──────────────────────────────
+        // The old code checked the count *before* the LLM call but only
+        // inserted the user's message *after* it finished (which can take
+        // minutes) — two concurrent prompts in the same session could both
+        // read the same pre-call count and both slip past MAX_PROMPTS_PER_SESSION.
+        // Locking the session row, re-checking, and inserting the message all
+        // happen here in one short transaction (milliseconds), closing that
+        // window, instead of holding a lock for the entire LLM round-trip.
+        await cds.tx(async (tx) => {
+            session = await tx.run(
+                SELECT.one.from('sap.aigateway.ChatSessions').where({ ID: sessionId }).forUpdate()
+            );
+            if (!session) throw new Error('Session not found.');
 
-        const userMessageCount = messagesData.reduce((acc, m) => acc + (m.role === 'user' ? 1 : 0), 0);
-        if (userMessageCount >= MAX_PROMPTS_PER_SESSION) {
-            throw new Error(`Maximum prompt limit (${MAX_PROMPTS_PER_SESSION}) reached. Please start a new chat.`);
-        }
+            messagesData = await tx.run(
+                SELECT.from('sap.aigateway.ChatMessages')
+                    .where({ session_ID: sessionId })
+                    .orderBy('createdAt asc')
+            );
+
+            const userMessageCount = messagesData.reduce((acc, m) => acc + (m.role === 'user' ? 1 : 0), 0);
+            if (userMessageCount >= MAX_PROMPTS_PER_SESSION) {
+                throw new Error(`Maximum prompt limit (${MAX_PROMPTS_PER_SESSION}) reached. Please start a new chat.`);
+            }
+
+            await tx.run(INSERT.into('sap.aigateway.ChatMessages').entries({
+                ID: crypto.randomUUID(), session_ID: sessionId,
+                role: 'user', content: safePrompt, modelId,
+                createdAt: reservedAt, createdBy: 'system',
+                modifiedAt: reservedAt, modifiedBy: 'system'
+            }));
+        });
 
         const functionalSpec = safeSpec || session.functionalspec || null;
+        // messagesData was captured BEFORE the reservation insert above, so it
+        // correctly excludes the current prompt — same semantics as before.
         const dbHistory = messagesData.map(m => ({ role: m.role, content: m.content }));
         const latencyStart = Date.now();
 
@@ -306,20 +338,12 @@ module.exports = cds.service.impl(async function () {
             const latency = Date.now() - latencyStart;
             const now = new Date().toISOString();
 
-            await INSERT.into('sap.aigateway.ChatMessages').entries([
-                {
-                    ID: crypto.randomUUID(), session_ID: sessionId,
-                    role: 'user', content: safePrompt, modelId,
-                    createdAt: now, createdBy: 'system',
-                    modifiedAt: now, modifiedBy: 'system'
-                },
-                {
-                    ID: crypto.randomUUID(), session_ID: sessionId,
-                    role: 'assistant', content: output, modelId, latency,
-                    createdAt: new Date(Date.now() + 1).toISOString(), createdBy: 'system',
-                    modifiedAt: now, modifiedBy: 'system'
-                }
-            ]);
+            await INSERT.into('sap.aigateway.ChatMessages').entries({
+                ID: crypto.randomUUID(), session_ID: sessionId,
+                role: 'assistant', content: output, modelId, latency,
+                createdAt: now, createdBy: 'system',
+                modifiedAt: now, modifiedBy: 'system'
+            });
 
             onChunk(output);
         } catch (err) {
@@ -329,20 +353,12 @@ module.exports = cds.service.impl(async function () {
             const now = new Date().toISOString();
             onChunk(errMsg);
 
-            await INSERT.into('sap.aigateway.ChatMessages').entries([
-                {
-                    ID: crypto.randomUUID(), session_ID: sessionId,
-                    role: 'user', content: safePrompt, modelId,
-                    createdAt: now, createdBy: 'system',
-                    modifiedAt: now, modifiedBy: 'system'
-                },
-                {
-                    ID: crypto.randomUUID(), session_ID: sessionId,
-                    role: 'assistant', content: errMsg, modelId, latency,
-                    createdAt: new Date(Date.now() + 1).toISOString(), createdBy: 'system',
-                    modifiedAt: now, modifiedBy: 'system'
-                }
-            ]);
+            await INSERT.into('sap.aigateway.ChatMessages').entries({
+                ID: crypto.randomUUID(), session_ID: sessionId,
+                role: 'assistant', content: errMsg, modelId, latency,
+                createdAt: now, createdBy: 'system',
+                modifiedAt: now, modifiedBy: 'system'
+            });
         }
     };
 });
