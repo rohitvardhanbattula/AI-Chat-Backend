@@ -346,16 +346,18 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
 
 // ─── GPT-4o ───────────────────────────────────────────────────────────────────
 
-// Converts MCP tools to OpenAI function-calling format
 function mcpToolsToGPTFormat(tools) {
     const uniqueTools = [
         ...new Map(tools.map(tool => [tool.name, tool])).values()
     ];
 
     return uniqueTools.map(t => ({
-        name: t.name,
-        description: t.description || '',
-        input_schema: t.parameters || { type: 'object', properties: {} }
+        type: 'function',
+        function: {
+            name: t.name,
+            description: t.description || '',
+            parameters: t.parameters || { type: 'object', properties: {} }
+        }
     }));
 }
 

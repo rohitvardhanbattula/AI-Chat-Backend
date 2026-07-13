@@ -153,7 +153,7 @@ cds.on('bootstrap', app => {
         requireAuth,
         async (req, res) => {
             initSSE(req, res);
-            const { modelId, prompt, category, extractedText } = req.body;
+            const { modelId, prompt, category, extractedText, connectionId } = req.body;
 
             if (!modelId || !prompt) {
                 sendSSE(res, { status: 'error', message: 'modelId and prompt are required.' });
@@ -168,7 +168,7 @@ cds.on('bootstrap', app => {
                 const srv = await cds.connect.to('AIService');
                 await srv.generateStreamNoSession(modelId, prompt, category, extractedText, chunk => {
                     if (chunk) sendSSE(res, { status: 'chunk', content: chunk });
-                }, req.user?.userId);
+                }, req.user?.userId, connectionId || null);
                 clearInterval(heartbeat);
                 sendSSE(res, { status: 'done' });
             } catch (err) {

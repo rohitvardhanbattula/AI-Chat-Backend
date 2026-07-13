@@ -61,7 +61,7 @@ service AIService {
     // configured in the BTP cockpit.
     action getDestinations()                                                                        returns array of Destinations;
     // ── Chat actions ──────────────────────────────────────────────────────────
-    action generateMultiModelResponse(prompt: String, category: String, extractedText: LargeString) returns array of ModelResponse;
+    action generateMultiModelResponse(prompt: String, category: String, extractedText: LargeString, connectionId: String) returns array of ModelResponse;
 
     type MessageInput {
         role    : String(20);

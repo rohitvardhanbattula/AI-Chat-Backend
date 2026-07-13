@@ -243,18 +243,19 @@ module.exports = cds.service.impl(async function () {
         const prompt = sanitise(req.data.prompt, 50_000);
         const category = sanitise(req.data.category, 100);
         const extractedText = sanitise(req.data.extractedText, 200_000) || null;
+        const connectionId = sanitise(req.data.connectionId, 100) || null;
         if (!prompt) return req.reject(400, 'prompt is required.');
 
         const claudeModel = resolveClaudeModel(category);
         const promptWithContext = buildPromptWithContext(prompt, extractedText);
 
-        incrementPromptCount(req.user?.userId); // fire-and-forget
+        incrementPromptCount(req.user?.userId);
 
         const results = await Promise.allSettled([
-            callGemini(null, promptWithContext, GLOBAL_SYSTEM_INSTRUCTION),
-            callGPT4o(null, promptWithContext, GLOBAL_SYSTEM_INSTRUCTION),
-            callSAPGenAIHub(null, promptWithContext, GLOBAL_SYSTEM_INSTRUCTION),
-            callClaude(null, prompt, [], claudeModel, extractedText)
+            callGemini(connectionId, promptWithContext, GLOBAL_SYSTEM_INSTRUCTION),
+            callGPT4o(connectionId, promptWithContext, GLOBAL_SYSTEM_INSTRUCTION),
+            callSAPGenAIHub(connectionId, promptWithContext, GLOBAL_SYSTEM_INSTRUCTION),
+            callClaude(connectionId, prompt, [], claudeModel, extractedText)
         ]);
 
         return results.map((r, i) =>
@@ -271,12 +272,12 @@ module.exports = cds.service.impl(async function () {
     });
 
     // ── Streaming (no session — comparison screen) ─────────────────────────
-    this.generateStreamNoSession = async function (modelId, prompt, category, extractedText, onChunk, userId) {
+    this.generateStreamNoSession = async function (modelId, prompt, category, extractedText, onChunk, userId, connectionId) {
         const safePrompt = sanitise(prompt, 50_000);
         const safeSpec = sanitise(extractedText, 200_000) || null;
         incrementPromptCount(userId); // fire-and-forget
         try {
-            const output = await generateWithValidation(null, modelId, safePrompt, [], category, safeSpec);
+            const output = await generateWithValidation(connectionId || null, modelId, safePrompt, [], category, safeSpec);
             onChunk(output);
         } catch (err) {
             console.error('[generateStreamNoSession]', err?.message);
