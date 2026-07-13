@@ -134,7 +134,7 @@ cds.on('bootstrap', app => {
                 const srv = await cds.connect.to('AIService');
                 await srv.generateStream(sessionId, modelId, prompt, category, extractedText, chunk => {
                     if (chunk) sendSSE(res, { status: 'chunk', content: chunk });
-                });
+                }, req.user?.userId);
                 clearInterval(heartbeat);
                 sendSSE(res, { status: 'done' });
             } catch (err) {
@@ -168,7 +168,7 @@ cds.on('bootstrap', app => {
                 const srv = await cds.connect.to('AIService');
                 await srv.generateStreamNoSession(modelId, prompt, category, extractedText, chunk => {
                     if (chunk) sendSSE(res, { status: 'chunk', content: chunk });
-                });
+                }, req.user?.userId);
                 clearInterval(heartbeat);
                 sendSSE(res, { status: 'done' });
             } catch (err) {

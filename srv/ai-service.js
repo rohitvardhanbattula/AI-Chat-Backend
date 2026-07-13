@@ -17,6 +17,20 @@ function sanitise(val, maxLen = 500_000) {
     return val.slice(0, maxLen);
 }
 
+// ── Usage tracking ────────────────────────────────────────────────────────────
+// Increments Users.promptCount by 1 every time a user submits a prompt.
+// Fire-and-forget with logging so a tracking failure never breaks the chat flow.
+async function incrementPromptCount(userId) {
+    if (!userId) return;
+    try {
+        await UPDATE('sap.aigateway.Users')
+            .set('promptCount = promptCount + 1')
+            .where({ ID: userId });
+    } catch (err) {
+        console.error('[incrementPromptCount] failed for userId=' + userId, err?.message);
+    }
+}
+
 // ── JWT guard for CDS actions that need authentication ─────────────────────────
 async function requireJwt(req) {
     const headers = req._.req?.headers;
@@ -226,6 +240,8 @@ module.exports = cds.service.impl(async function () {
         const claudeModel = resolveClaudeModel(category);
         const promptWithContext = buildPromptWithContext(prompt, extractedText);
 
+        incrementPromptCount(req.user?.userId); // fire-and-forget
+
         const results = await Promise.allSettled([
             callGemini(null, promptWithContext, GLOBAL_SYSTEM_INSTRUCTION),
             callGPT4o(null, promptWithContext, GLOBAL_SYSTEM_INSTRUCTION),
@@ -247,9 +263,10 @@ module.exports = cds.service.impl(async function () {
     });
 
     // ── Streaming (no session — comparison screen) ─────────────────────────
-    this.generateStreamNoSession = async function (modelId, prompt, category, extractedText, onChunk) {
+    this.generateStreamNoSession = async function (modelId, prompt, category, extractedText, onChunk, userId) {
         const safePrompt = sanitise(prompt, 50_000);
         const safeSpec = sanitise(extractedText, 200_000) || null;
+        incrementPromptCount(userId); // fire-and-forget
         try {
             const output = await generateWithValidation(null, modelId, safePrompt, [], category, safeSpec);
             onChunk(output);
@@ -260,10 +277,11 @@ module.exports = cds.service.impl(async function () {
     };
 
     // ── Streaming (with session — active chat) ─────────────────────────────
-    this.generateStream = async function (sessionId, modelId, prompt, category, extractedText, onChunk) {
+    this.generateStream = async function (sessionId, modelId, prompt, category, extractedText, onChunk, userId) {
         const crypto = require('crypto');
         const safePrompt = sanitise(prompt, 50_000);
         const safeSpec = sanitise(extractedText, 200_000) || null;
+        incrementPromptCount(userId); // fire-and-forget
 
         const [session, messagesData] = await Promise.all([
             SELECT.one.from('sap.aigateway.ChatSessions').where({ ID: sessionId }),
