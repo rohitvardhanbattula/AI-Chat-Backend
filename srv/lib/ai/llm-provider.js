@@ -227,7 +227,11 @@ function mcpToolsToClaudeFormat(tools) {
     }));
 }
 
-// Inner provider fn used by agenticToolLoop for Claude via GenAI Hub
+// Inner provider fn used by agenticToolLoop for Claude via GenAI Hub.
+// Unlike callClaudeViaApiKeyInner, this does NOT take a `model` argument —
+// GENHUB_CLAUDE_DEPLOYMENT is a single fixed deployment in SAP AI Core, so
+// there is no "simple vs complex" model to pick here (mirrors callGPT4oInner,
+// which also always targets one fixed GENHUB_GPT_DEPLOYMENT).
 async function callClaudeViaGenHubInner(functionalSpec) {
     return async function(prompt, systemInstruction, history, tools) {
         const cleanHistory = sanitiseHistoryForClaude(history);
@@ -323,10 +327,13 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
         ? require('../utils/helpers').GENERAL_SYSTEM_INSTRUCTION
         : GLOBAL_SYSTEM_INSTRUCTION;
 
+    // NOTE: GenHub always calls one fixed deployment (GENHUB_CLAUDE_DEPLOYMENT),
+    // so `model` (simple vs complex) has no effect here — it only matters for
+    // the direct API-key fallback below, where the model id is sent explicitly.
     try {
         const providerFn = await callClaudeViaGenHubInner(functionalSpec);
         const content    = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
-        return { modelId: 'claude', content, latency: Date.now() - start, model: 'opus-genhub' };
+        return { modelId: 'claude', content, latency: Date.now() - start, model: 'genhub-fixed-deployment' };
     } catch (hubErr) {
         console.warn('callClaude: GenAI Hub failed, falling back to API key:', hubErr?.message);
         try {
