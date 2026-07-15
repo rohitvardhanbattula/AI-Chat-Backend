@@ -15,10 +15,34 @@ module.exports.resolveClaudeModel = resolveClaudeModel;
 // ─── Agentic tool loop ────────────────────────────────────────────────────────
 // providerCallFn(prompt, systemInstruction, history, tools) → { content, toolCalls }
 // toolCalls: [{ id, name, arguments }] | null
+// A tool result is considered a failure if it's JSON shaped like { error: ... }.
+// This is the shape mcpBridge.executeTool() returns on any thrown error
+// (including a 500 from the underlying SAP/ADT call).
+function isToolErrorResult(resultText) {
+    if (typeof resultText !== 'string') return false;
+    try {
+        const parsed = JSON.parse(resultText);
+        return !!(parsed && typeof parsed === 'object' && 'error' in parsed);
+    } catch {
+        return false;
+    }
+}
+
+function callSignature(call) {
+    return `${call.name}::${JSON.stringify(call.arguments || {})}`;
+}
+
 async function agenticToolLoop(sessionId, prompt, systemInstruction, history, providerCallFn) {
     let currentHistory  = [...history];
     let toolLoopCount   = 0;
     const MAX_TOOL_LOOPS = 5;
+
+    // Circuit breaker: how many times the *exact same* tool call (name + args)
+    // is allowed to fail before we stop actually invoking it and instead tell
+    // the model to stop retrying. This is what mirrors Claude Desktop's
+    // behavior of not hammering a broken tool call after repeated failures.
+    const MAX_SAME_CALL_FAILURES = 2;
+    const failureCounts = new Map(); // signature -> consecutive failure count
 
     const tools = sessionId ? mcpBridge.getToolsForLLM(sessionId) : [];
 
@@ -31,7 +55,33 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
 
         const toolResults = [];
         for (const call of response.toolCalls) {
+            const signature     = callSignature(call);
+            const priorFailures = failureCounts.get(signature) || 0;
+
+            if (priorFailures >= MAX_SAME_CALL_FAILURES) {
+                // Circuit open: this exact call has already failed enough times.
+                // Don't hit the (likely still-broken) tool/backend again — return
+                // a synthetic result instructing the model not to retry it.
+                console.warn(`[agenticToolLoop] circuit open for ${signature} after ${priorFailures} failures — skipping call`);
+                toolResults.push({
+                    toolCallId: call.id,
+                    name:       call.name,
+                    result: JSON.stringify({
+                        error: `Tool "${call.name}" has already failed ${priorFailures} times with these exact arguments and will not be called again. Do not retry it with the same arguments — try different arguments, a different tool, or tell the user the operation is currently unavailable.`,
+                        retryable: false
+                    })
+                });
+                continue;
+            }
+
             const resultText = await mcpBridge.executeTool(sessionId, call.name, call.arguments);
+
+            if (isToolErrorResult(resultText)) {
+                failureCounts.set(signature, priorFailures + 1);
+            } else if (priorFailures > 0) {
+                failureCounts.delete(signature); // succeeded — reset its failure streak
+            }
+
             toolResults.push({ toolCallId: call.id, name: call.name, result: resultText });
         }
 

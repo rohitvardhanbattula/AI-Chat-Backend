@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 "use strict";
+// PATCH MARKER: if this line does NOT appear in logs, the running app is loading
+// index.js from a DIFFERENT path than you edited. Check __filename in the output.
+process.stderr.write('[MCP index.js] PATCHED FILE LOADED from: ' + __filename + '\n');
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -140,11 +143,19 @@ class AbapAdtServer extends index_js_1.Server {
                 isError: true
             };
         }
+        // NOTE: previously this branch discarded the real error.message for
+        // any plain Error (which is what every handler in this codebase
+        // throws, e.g. QueryHandlers' "Failed to run query: <real reason>")
+        // and replaced it with a generic "Internal server error" string.
+        // That made every failure — auth issues, bad SQL, missing
+        // authorization, genuine backend 500s — look identical and
+        // undiagnosable from the caller side. Surface the real message
+        // instead; fall back to the generic text only if none is present.
         return {
             content: [{
                     type: 'text',
                     text: JSON.stringify({
-                        error: 'Internal server error',
+                        error: error.message || 'Internal server error',
                         code: types_js_1.ErrorCode.InternalError
                     })
                 }],

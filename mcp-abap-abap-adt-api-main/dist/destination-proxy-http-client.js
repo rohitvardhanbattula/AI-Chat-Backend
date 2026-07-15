@@ -1,4 +1,5 @@
 'use strict';
+console.error('[DestinationProxyHttpClient] PATCHED VERSION LOADED (cookie-jar build)');
 /**
  * Custom `HttpClient` implementation for `abap-adt-api`'s `ADTClient`.
  *
@@ -34,6 +35,33 @@ class DestinationProxyHttpClient {
         this.destinationName = destinationName;
         this.basicAuth = basicAuth;
         this._destination = null;
+
+        // Session cookie jar. abap-adt-api's stateful/CSRF-protected calls
+        // (runQuery, tableContents, debugger, etc.) only work if the CSRF
+        // token fetched on one request is presented back on the *same*
+        // SAP session on the next request. Without replaying cookies here,
+        // every request looks like a brand-new session to SAP and stateful
+        // calls fail with a 403 even though the credentials are fine.
+        this._cookieJar = new Map(); // cookie name -> value
+    }
+
+    _cookieHeader() {
+        if (this._cookieJar.size === 0) return undefined;
+        return [...this._cookieJar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
+    }
+
+    _storeCookies(setCookieHeader) {
+        if (!setCookieHeader) return;
+        const cookies = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+        for (const raw of cookies) {
+            // Each Set-Cookie value looks like "NAME=VALUE; Path=/; HttpOnly; ..."
+            const [pair] = raw.split(';');
+            const idx = pair.indexOf('=');
+            if (idx === -1) continue;
+            const name  = pair.slice(0, idx).trim();
+            const value = pair.slice(idx + 1).trim();
+            if (name) this._cookieJar.set(name, value);
+        }
     }
 
     async _resolveDestination() {
@@ -71,6 +99,13 @@ class DestinationProxyHttpClient {
             headers.Authorization = `Basic ${token}`;
         }
 
+        // Replay any cookies captured from previous responses on this same
+        // session, unless the caller explicitly set its own Cookie header.
+        const jarCookie = this._cookieHeader();
+        if (jarCookie && !headers.Cookie && !headers.cookie) {
+            headers.Cookie = jarCookie;
+        }
+
         const requestConfig = {
             method: (options.method || 'get').toLowerCase(),
             url: options.url,
@@ -94,11 +129,31 @@ class DestinationProxyHttpClient {
             throw new Error(`SAP request via destination "${this.destinationName}" failed: ${cause}`);
         }
 
+        // Capture any session cookie SAP set on this response (e.g. after the
+        // CSRF-token-fetch GET) so it's replayed on the next stateful call.
+        const responseHeaders = response.headers || {};
+        const setCookie = responseHeaders['set-cookie'] || responseHeaders['Set-Cookie'];
+        this._storeCookies(setCookie);
+
+        if (response.status === 403) {
+            // If this still 403s after adding the cookie jar, the likely next
+            // suspect is the Cloud Connector / Connectivity Proxy tunnel
+            // itself stripping Set-Cookie on the way through — this log line
+            // tells us which case we're in without needing another repro.
+            console.warn('[DestinationProxyHttpClient] 403 response', {
+                url: options.url,
+                method: requestConfig.method,
+                receivedSetCookie: !!setCookie,
+                cookieJarSize: this._cookieJar.size,
+                sentCookieHeader: !!headers.Cookie,
+            });
+        }
+
         return {
             body: response.data != null ? response.data : '',
             status: response.status,
             statusText: response.statusText,
-            headers: response.headers || {},
+            headers: responseHeaders,
             request: response.request,
         };
     }

@@ -456,7 +456,10 @@ class AdtMcpBridgeManager {
                 callMs: Date.now() - callStart,
                 error:  err.message,
             });
-            return JSON.stringify({ error: err.message });
+            // retryable:false lets the agentic tool loop's circuit breaker
+            // (in llm-provider.js) recognize this as a hard failure and stop
+            // re-invoking the same call after it repeats a couple of times.
+            return JSON.stringify({ error: err.message, retryable: false });
         }
     }
 }
