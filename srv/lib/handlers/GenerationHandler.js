@@ -30,7 +30,7 @@ async function generateWithValidation(sessionId, modelId, prompt, history, categ
         switch (normalizedModelId) {
             case 'gemini': {
                 const res = await callGemini(sessionId, p, nonClaudeSystemInstruction, h);
-                return res.error ? 'model is not available at the moment' : res.content;
+                return res.content;
             }
             case 'claude': {
                 // Retries are refinement passes (fix formatting / swap a
@@ -38,15 +38,15 @@ async function generateWithValidation(sessionId, modelId, prompt, history, categ
                 // cheaper model is usually enough and cuts retry cost.
                 const modelForThisCall = useCheaperModel ? CLAUDE_MODEL_SIMPLE : claudeModel;
                 const res = await callClaude(sessionId, p, h, modelForThisCall, functionalSpec, category);
-                return res.error ? 'model is not available at the moment' : res.content;
+                return res.content;
             }
             case 'gpt4o': {
                 const res = await callGPT4o(sessionId, p, nonClaudeSystemInstruction, h);
-                return res.error ? 'model is not available at the moment' : res.content;
+                return res.content;
             }
             default: {
                 const res = await callSAPGenAIHub(sessionId, p, nonClaudeSystemInstruction, h);
-                return res.error ? 'model is not available at the moment' : res.content;
+                return res.content;
             }
         }
     };
@@ -60,7 +60,6 @@ async function generateWithValidation(sessionId, modelId, prompt, history, categ
     while (attempt < MAX_RETRIES) {
         //console.log("entry");
         const generatedText = await callModel(currentPrompt, internalHistory, attempt > 0);
-        if (generatedText === 'model is not available at the moment') return generatedText;
 
         const validation = performValidation(generatedText);
 
@@ -94,7 +93,7 @@ async function generateWithValidation(sessionId, modelId, prompt, history, categ
         return buildFinalReport(generatedText, validation.internalFeedback.trim());
     }
 
-    return 'model is not available at the moment';
+    throw new Error('Maximum retries exhausted without producing valid output.');
 }
 
 module.exports = { generateWithValidation };

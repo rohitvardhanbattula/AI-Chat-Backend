@@ -39,8 +39,7 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
 
     // Circuit breaker: how many times the *exact same* tool call (name + args)
     // is allowed to fail before we stop actually invoking it and instead tell
-    // the model to stop retrying. This is what mirrors Claude Desktop's
-    // behavior of not hammering a broken tool call after repeated failures.
+    // the model to stop retrying.
     const MAX_SAME_CALL_FAILURES = 2;
     const failureCounts = new Map(); // signature -> consecutive failure count
 
@@ -60,8 +59,6 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
 
             if (priorFailures >= MAX_SAME_CALL_FAILURES) {
                 // Circuit open: this exact call has already failed enough times.
-                // Don't hit the (likely still-broken) tool/backend again — return
-                // a synthetic result instructing the model not to retry it.
                 console.warn(`[agenticToolLoop] circuit open for ${signature} after ${priorFailures} failures — skipping call`);
                 toolResults.push({
                     toolCallId: call.id,
@@ -90,7 +87,34 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
         toolLoopCount++;
     }
 
-    return 'The model requested too many operations. Please refine your query.';
+    // --- UPDATED BEHAVIOR ---
+    // Instead of throwing an error, we extract the results from the final loop
+    // to formulate a response detailing what failed and why.
+    let failureSummary = "The assistant requested too many tool operations without reaching a final answer (Max loops exceeded).\n\n**Recent Tool Failures / Outputs:**\n";
+    const lastToolEntry = currentHistory[currentHistory.length - 1];
+
+    if (lastToolEntry && lastToolEntry.role === 'tool' && lastToolEntry.results) {
+        for (const res of lastToolEntry.results) {
+            let outputStr = res.result;
+            
+            // Attempt to parse JSON to display cleaner error messages if available
+            try {
+                const parsedResult = JSON.parse(res.result);
+                if (parsedResult && parsedResult.error) {
+                    outputStr = parsedResult.error;
+                }
+            } catch (e) {
+                // Not JSON, just use the raw string
+            }
+            
+            failureSummary += `- **${res.name}**: ${outputStr}\n`;
+        }
+    } else {
+        failureSummary += "- No tool results could be retrieved from the final step.";
+    }
+
+    // Return the formatted string rather than throwing
+    return failureSummary;
 }
 
 // ─── Gemini ───────────────────────────────────────────────────────────────────
@@ -184,7 +208,7 @@ async function callGemini(sessionId, prompt, systemInstruction, history = []) {
             return { modelId: 'gemini', content, latency: Date.now() - start };
         } catch (fallbackErr) {
             console.error('callGemini: Vertex AI fallback also failed:', fallbackErr?.message);
-            return { modelId: 'gemini', content: 'model is not available at the moment', latency: 0, error: true };
+            throw fallbackErr;
         }
     }
 }
@@ -396,7 +420,7 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
             return { modelId: 'claude', content, latency: Date.now() - start, model };
         } catch (fallbackErr) {
             console.error('callClaude: fallback also failed:', fallbackErr?.message);
-            return { modelId: 'claude', content: 'model is not available at the moment', latency: 0, error: true };
+            throw fallbackErr;
         }
     }
 }
@@ -500,7 +524,7 @@ async function callGPT4o(sessionId, prompt, systemInstruction, history = []) {
         return { modelId: 'gpt4o', content, latency: Date.now() - start };
     } catch (err) {
         console.error('callGPT4o error:', err?.message);
-        return { modelId: 'gpt4o', content: 'model is not available at the moment', latency: 0, error: true };
+        throw err;
     }
 }
 
@@ -525,7 +549,7 @@ async function callSAPGenAIHub(sessionId, prompt, systemInstruction, history = [
         return { modelId: 'perplexity', content, latency: Date.now() - start };
     } catch (err) {
         console.error('callSAPGenAIHub error:', err?.message);
-        return { modelId: 'perplexity', content: 'model is not available at the moment', latency: 0, error: true };
+        throw err;
     }
 }
 

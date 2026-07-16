@@ -281,7 +281,7 @@ module.exports = cds.service.impl(async function () {
             onChunk(output);
         } catch (err) {
             console.error('[generateStreamNoSession]', err?.message);
-            onChunk('model is not available at the moment');
+            throw err;
         }
     };
 
@@ -349,10 +349,17 @@ module.exports = cds.service.impl(async function () {
             onChunk(output);
         } catch (err) {
             console.error('[generateStream]', err?.message);
-            const errMsg = 'model is not available at the moment';
+            const errMsg = err?.message || 'An unexpected error occurred.';
             const latency = Date.now() - latencyStart;
             const now = new Date().toISOString();
-            onChunk(errMsg);
+
+            // Re-throw limit errors so the SSE layer can send the correct error
+            // event to the frontend (which shows the "start a new chat" popup).
+            // For all other errors, record the failure in the DB and surface the
+            // real message — never silently swallow it as "model is not available".
+            if (errMsg.includes('Maximum prompt limit')) {
+                throw err;
+            }
 
             await INSERT.into('sap.aigateway.ChatMessages').entries({
                 ID: crypto.randomUUID(), session_ID: sessionId,
@@ -360,6 +367,7 @@ module.exports = cds.service.impl(async function () {
                 createdAt: now, createdBy: 'system',
                 modifiedAt: now, modifiedBy: 'system'
             });
+            onChunk(errMsg);
         }
     };
 });
