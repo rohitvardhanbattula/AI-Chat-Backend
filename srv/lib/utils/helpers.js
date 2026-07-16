@@ -29,19 +29,48 @@ async function getCachedDestination(name) {
 function trimContext(prompt, history, maxTokens = MAX_INPUT_TOKENS) {
     let trimmed = history.slice(-MAX_HISTORY_MESSAGES);
 
-    const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
-    let historyTokens  = trimmed.reduce((acc, m) => {
-        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
-        return acc + Math.ceil(content.length / CHARS_PER_TOKEN);
-    }, 0);
+    // Correctly estimate token cost for ALL message shapes:
+    //   - Plain text messages:               { role, content: string }
+    //   - Agentic assistant turns:           { role: 'assistant', toolCalls: [...], content: '' }
+    //   - Agentic tool result turns:         { role: 'tool', results: [...] }
+    //   - Claude-sanitised tool_use turns:   { role: 'assistant', content: [{type:'tool_use',...}] }
+    //   - Claude-sanitised tool_result turns:{ role: 'user',      content: [{type:'tool_result',...}] }
+    function messageTokens(m) {
+        if (typeof m.content === 'string') {
+            // Also account for toolCalls on assistant turns
+            const tcCost = m.toolCalls ? JSON.stringify(m.toolCalls).length : 0;
+            return Math.ceil((m.content.length + tcCost) / CHARS_PER_TOKEN);
+        }
+        if (Array.isArray(m.content)) {
+            // Claude structured content blocks
+            return Math.ceil(JSON.stringify(m.content).length / CHARS_PER_TOKEN);
+        }
+        if (m.results) {
+            // Tool result turns { role: 'tool', results: [...] }
+            return Math.ceil(JSON.stringify(m.results).length / CHARS_PER_TOKEN);
+        }
+        return 0;
+    }
 
-    // Remove oldest messages until we fit within budget
+    const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
+    let historyTokens  = trimmed.reduce((acc, m) => acc + messageTokens(m), 0);
+
+    // Remove oldest messages until we fit within budget.
+    // IMPORTANT: always remove in pairs when an assistant tool-call turn is
+    // followed by its tool-result turn — orphaning either side causes provider errors.
     while (trimmed.length > 0 && (promptTokens + historyTokens) > maxTokens) {
-        const removed        = trimmed.shift();
-        const removedContent = typeof removed.content === 'string'
-            ? removed.content
-            : JSON.stringify(removed.content || '');
-        historyTokens -= Math.ceil(removedContent.length / CHARS_PER_TOKEN);
+        // Find the oldest tool-call pair or plain message to drop
+        const firstIsToolCall = trimmed[0]?.toolCalls || (Array.isArray(trimmed[0]?.content) && trimmed[0]?.content?.some(b => b.type === 'tool_use'));
+        const secondIsToolResult = trimmed[1]?.role === 'tool' || (Array.isArray(trimmed[1]?.content) && trimmed[1]?.content?.some(b => b.type === 'tool_result'));
+
+        if (firstIsToolCall && secondIsToolResult && trimmed.length >= 2) {
+            // Drop the pair together to keep history consistent
+            historyTokens -= messageTokens(trimmed[0]) + messageTokens(trimmed[1]);
+            trimmed.splice(0, 2);
+        } else {
+            historyTokens -= messageTokens(trimmed[0]);
+            trimmed.shift();
+        }
     }
 
     let finalPrompt = prompt;

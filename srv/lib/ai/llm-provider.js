@@ -2,6 +2,7 @@
 const cds = require('@sap/cds');
 const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
 const mcpBridge = require('../abap/adt-mcp-bridge');
+const { routeRelevantTools } = require('../../tool-router'); // Dynamic Tool Retrieval
 const {
     getCachedDestination, trimContext, GLOBAL_SYSTEM_INSTRUCTION, resolveClaudeModel,
     GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
@@ -35,7 +36,7 @@ function callSignature(call) {
 async function agenticToolLoop(sessionId, prompt, systemInstruction, history, providerCallFn) {
     let currentHistory  = [...history];
     let toolLoopCount   = 0;
-    const MAX_TOOL_LOOPS = 5;
+    const MAX_TOOL_LOOPS = 10;
 
     // Circuit breaker: how many times the *exact same* tool call (name + args)
     // is allowed to fail before we stop actually invoking it and instead tell
@@ -43,7 +44,50 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
     const MAX_SAME_CALL_FAILURES = 2;
     const failureCounts = new Map(); // signature -> consecutive failure count
 
-    const tools = sessionId ? mcpBridge.getToolsForLLM(sessionId) : [];
+    // Accumulate every unique tool result across ALL loops for the final summary.
+    // Key: tool name → {result, success}. Success overwrites failure so the
+    // summary always shows the best outcome achieved for each tool.
+    const allToolResults = new Map();
+
+    // Hard ceiling on total tool executions per turn regardless of loop count,
+    // to prevent runaway costs with large tool sets and many retries.
+    const MAX_TOTAL_TOOL_CALLS = 20;
+    let totalToolCalls = 0;
+
+    // ── Dynamic Tool Retrieval ────────────────────────────────────────────────
+    // Run the router ONCE before the while-loop begins. If the session has no
+    // tools (no MCP connection) we skip routing entirely.
+    // The router uses only the current prompt + last few history messages so it
+    // stays fast; the main model still receives the full history below.
+    let tools = [];
+    if (sessionId) {
+        const allTools = mcpBridge.getToolsForLLM(sessionId); // full catalog
+        if (allTools.length > 0) {
+            // If the catalog is small enough to fit comfortably, skip the router
+            // overhead and inject directly (avoids an unnecessary LLM call).
+            const ROUTER_THRESHOLD = 15;
+            if (allTools.length <= ROUTER_THRESHOLD) {
+                tools = allTools;
+            } else {
+                // Large catalog → route to a focused subset
+                tools = await routeRelevantTools(prompt, sessionId, allTools, history);
+                // Safety net: if the router returned nothing, fall back to a small
+                // curated default set instead of dumping all 128 schemas into context.
+                // These are the tools most likely to be useful for any SAP request.
+                if (tools.length === 0) {
+                    const DEFAULT_FALLBACK_TOOLS = new Set([
+                        'healthcheck', 'searchObject', 'tableContents',
+                        'runQuery', 'objectStructure', 'ddicElement'
+                    ]);
+                    tools = allTools.filter(t => DEFAULT_FALLBACK_TOOLS.has(t.name));
+                    console.warn(`[agenticToolLoop] router returned 0 tools for session=${sessionId} — using ${tools.length} default fallback tools`);
+                }
+            }
+        }
+    }
+    // tools is now the focused, hydrated subset for this turn.
+    // It is captured here and reused across every iteration of the while-loop
+    // so the router is never called more than once per user turn.
 
     while (toolLoopCount < MAX_TOOL_LOOPS) {
         const response = await providerCallFn(prompt, systemInstruction, currentHistory, tools);
@@ -56,6 +100,20 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
         for (const call of response.toolCalls) {
             const signature     = callSignature(call);
             const priorFailures = failureCounts.get(signature) || 0;
+
+            // Hard stop: never exceed the total execution budget for this turn
+            if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
+                console.warn(`[agenticToolLoop] total tool call budget (${MAX_TOTAL_TOOL_CALLS}) exhausted — skipping remaining calls`);
+                toolResults.push({
+                    toolCallId: call.id,
+                    name:       call.name,
+                    result: JSON.stringify({
+                        error: `Total tool execution budget exhausted. Tell the user what you have found so far and stop making tool calls.`,
+                        retryable: false
+                    })
+                });
+                continue;
+            }
 
             if (priorFailures >= MAX_SAME_CALL_FAILURES) {
                 // Circuit open: this exact call has already failed enough times.
@@ -71,6 +129,7 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
                 continue;
             }
 
+            totalToolCalls++;
             const resultText = await mcpBridge.executeTool(sessionId, call.name, call.arguments);
 
             if (isToolErrorResult(resultText)) {
@@ -79,6 +138,12 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
                 failureCounts.delete(signature); // succeeded — reset its failure streak
             }
 
+            const isSuccess = !isToolErrorResult(resultText);
+            // Always keep the best result for this tool — success beats failure
+            const existing = allToolResults.get(call.name);
+            if (!existing || (!existing.success && isSuccess)) {
+                allToolResults.set(call.name, { result: resultText, success: isSuccess });
+            }
             toolResults.push({ toolCallId: call.id, name: call.name, result: resultText });
         }
 
@@ -87,30 +152,22 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
         toolLoopCount++;
     }
 
-    // --- UPDATED BEHAVIOR ---
-    // Instead of throwing an error, we extract the results from the final loop
-    // to formulate a response detailing what failed and why.
-    let failureSummary = "The assistant requested too many tool operations without reaching a final answer (Max loops exceeded).\n\n**Recent Tool Failures / Outputs:**\n";
-    const lastToolEntry = currentHistory[currentHistory.length - 1];
+    // Build a summary from ALL unique tool attempts across every loop,
+    // not just the last one — so the user sees the full picture.
+    let failureSummary = "The assistant reached the maximum number of tool operation steps without a final answer.\n\n**All Tool Results (unique tools attempted):**\n";
 
-    if (lastToolEntry && lastToolEntry.role === 'tool' && lastToolEntry.results) {
-        for (const res of lastToolEntry.results) {
-            let outputStr = res.result;
-            
-            // Attempt to parse JSON to display cleaner error messages if available
+    if (allToolResults.size > 0) {
+        for (const [toolName, { result, success }] of allToolResults) {
+            let outputStr = result;
             try {
-                const parsedResult = JSON.parse(res.result);
-                if (parsedResult && parsedResult.error) {
-                    outputStr = parsedResult.error;
-                }
-            } catch (e) {
-                // Not JSON, just use the raw string
-            }
-            
-            failureSummary += `- **${res.name}**: ${outputStr}\n`;
+                const parsed = JSON.parse(result);
+                if (parsed && parsed.error) outputStr = parsed.error;
+            } catch (e) { /* not JSON, use raw */ }
+            const icon = success ? '✓' : '✗';
+            failureSummary += `- ${icon} **${toolName}**: ${outputStr}\n`;
         }
     } else {
-        failureSummary += "- No tool results could be retrieved from the final step.";
+        failureSummary += "- No tool results were recorded.";
     }
 
     // Return the formatted string rather than throwing
