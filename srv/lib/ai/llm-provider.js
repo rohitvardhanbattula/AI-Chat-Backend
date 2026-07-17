@@ -7,7 +7,7 @@ const {
     getCachedDestination, trimContext, GLOBAL_SYSTEM_INSTRUCTION, resolveClaudeModel,
     GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
     CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS,
-    MAX_OUTPUT_TOKENS_CLAUDE, CLAUDE_MODEL_SIMPLE,GENHUB_GPT_DEPLOYMENT
+    MAX_OUTPUT_TOKENS_CLAUDE, CLAUDE_MODEL_SIMPLE, GENHUB_GPT_DEPLOYMENT
 } = require('../utils/helpers');
 
 // Re-export resolveClaudeModel so callers that import it from here continue to work
@@ -34,8 +34,8 @@ function callSignature(call) {
 }
 
 async function agenticToolLoop(sessionId, prompt, systemInstruction, history, providerCallFn) {
-    let currentHistory  = [...history];
-    let toolLoopCount   = 0;
+    let currentHistory = [...history];
+    let toolLoopCount = 0;
     const MAX_TOOL_LOOPS = 10;
 
     // Circuit breaker: how many times the *exact same* tool call (name + args)
@@ -98,7 +98,7 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
 
         const toolResults = [];
         for (const call of response.toolCalls) {
-            const signature     = callSignature(call);
+            const signature = callSignature(call);
             const priorFailures = failureCounts.get(signature) || 0;
 
             // Hard stop: never exceed the total execution budget for this turn
@@ -106,7 +106,7 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
                 console.warn(`[agenticToolLoop] total tool call budget (${MAX_TOTAL_TOOL_CALLS}) exhausted — skipping remaining calls`);
                 toolResults.push({
                     toolCallId: call.id,
-                    name:       call.name,
+                    name: call.name,
                     result: JSON.stringify({
                         error: `Total tool execution budget exhausted. Tell the user what you have found so far and stop making tool calls.`,
                         retryable: false
@@ -120,7 +120,7 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
                 console.warn(`[agenticToolLoop] circuit open for ${signature} after ${priorFailures} failures — skipping call`);
                 toolResults.push({
                     toolCallId: call.id,
-                    name:       call.name,
+                    name: call.name,
                     result: JSON.stringify({
                         error: `Tool "${call.name}" has already failed ${priorFailures} times with these exact arguments and will not be called again. Do not retry it with the same arguments — try different arguments, a different tool, or tell the user the operation is currently unavailable.`,
                         retryable: false
@@ -154,24 +154,27 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
 
     // Build a summary from ALL unique tool attempts across every loop,
     // not just the last one — so the user sees the full picture.
-    let failureSummary = "The assistant reached the maximum number of tool operation steps without a final answer.\n\n**All Tool Results (unique tools attempted):**\n";
+    const toolDigest = allToolResults.size > 0
+        ? [...allToolResults.entries()]
+            .map(([name, { result, success }]) => {
+                let out = result;
+                try { const p = JSON.parse(result); if (p?.error) out = p.error; } catch { /* raw */ }
+                return `${success ? 'succeeded' : 'failed'} — ${name}: ${out}`;
+            })
+            .join('\n')
+        : 'No tool results were recorded.';
 
-    if (allToolResults.size > 0) {
-        for (const [toolName, { result, success }] of allToolResults) {
-            let outputStr = result;
-            try {
-                const parsed = JSON.parse(result);
-                if (parsed && parsed.error) outputStr = parsed.error;
-            } catch (e) { /* not JSON, use raw */ }
-            const icon = success ? '✓' : '✗';
-            failureSummary += `- ${icon} **${toolName}**: ${outputStr}\n`;
-        }
-    } else {
-        failureSummary += "- No tool results were recorded.";
+    const summaryPrompt =
+        `You attempted several operations on behalf of the user but reached the step limit before finishing. ` +
+        `Summarise what was found or accomplished in clear, friendly prose — no bullet points, no headers. ` +
+        `Here are the raw tool outcomes:\n\n${toolDigest}`;
+
+    try {
+        const summaryResponse = await providerCallFn(summaryPrompt, systemInstruction, [], []);
+        return summaryResponse.content || summaryPrompt;
+    } catch {
+        return `I ran out of steps before completing your request. Here is what I found:\n\n${toolDigest}`;
     }
-
-    // Return the formatted string rather than throwing
-    return failureSummary;
 }
 
 // ─── Gemini ───────────────────────────────────────────────────────────────────
@@ -202,8 +205,8 @@ async function callGeminiViaGenHub(prompt, systemInstruction, history = [], tool
     const response = await executeHttpRequest(
         { destinationName: 'GENERATIVE_AI_HUB' },
         {
-            method:  'POST',
-            url:     `/inference/deployments/${GENHUB_GEMINI_DEPLOYMENT}/models/gemini-2.5-pro:generateContent`,
+            method: 'POST',
+            url: `/inference/deployments/${GENHUB_GEMINI_DEPLOYMENT}/models/gemini-2.5-pro:generateContent`,
             headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
             data: {
                 system_instruction: { parts: [{ text: systemInstruction }] },
@@ -215,8 +218,8 @@ async function callGeminiViaGenHub(prompt, systemInstruction, history = [], tool
         { fetchCsrfToken: false }
     );
 
-    const parts         = response.data?.candidates?.[0]?.content?.parts || [];
-    const text          = parts.find(p => p.text)?.text || '';
+    const parts = response.data?.candidates?.[0]?.content?.parts || [];
+    const text = parts.find(p => p.text)?.text || '';
     const functionCalls = parts.filter(p => p.functionCall).map(p => ({
         id: p.functionCall.name, name: p.functionCall.name, arguments: p.functionCall.args
     }));
@@ -232,7 +235,7 @@ async function callGeminiViaVertexAI(prompt, systemInstruction, history = []) {
 
     const ai = new GoogleGenAI({
         vertexai: true,
-        project:  project_id,
+        project: project_id,
         location: 'us-central1',
         googleAuthOptions: {
             credentials: { client_email, private_key: private_key.replace(/\\n/g, '\n') }
@@ -364,7 +367,7 @@ function mcpToolsToClaudeFormat(tools) {
 // there is no "simple vs complex" model to pick here (mirrors callGPT4oInner,
 // which also always targets one fixed GENHUB_GPT_DEPLOYMENT).
 async function callClaudeViaGenHubInner(functionalSpec) {
-    return async function(prompt, systemInstruction, history, tools) {
+    return async function (prompt, systemInstruction, history, tools) {
         const cleanHistory = sanitiseHistoryForClaude(history);
         const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, cleanHistory);
 
@@ -386,18 +389,18 @@ async function callClaudeViaGenHubInner(functionalSpec) {
         const response = await executeHttpRequest(
             { destinationName: 'GENERATIVE_AI_HUB' },
             {
-                method:  'POST',
-                url:     `/inference/deployments/${GENHUB_CLAUDE_DEPLOYMENT}/invoke`,
+                method: 'POST',
+                url: `/inference/deployments/${GENHUB_CLAUDE_DEPLOYMENT}/invoke`,
                 headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
-                data:    body
+                data: body
             },
             { fetchCsrfToken: false }
         );
 
         const contentBlocks = response.data?.content || [];
-        const text       = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('');
-        const toolUses   = contentBlocks.filter(b => b.type === 'tool_use');
-        const toolCalls  = toolUses.length > 0
+        const text = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('');
+        const toolUses = contentBlocks.filter(b => b.type === 'tool_use');
+        const toolCalls = toolUses.length > 0
             ? toolUses.map(b => ({ id: b.id, name: b.name, arguments: b.input }))
             : null;
 
@@ -408,13 +411,13 @@ async function callClaudeViaGenHubInner(functionalSpec) {
 
 // Inner provider fn used by agenticToolLoop for Claude via direct API key
 async function callClaudeViaApiKeyInner(model, functionalSpec, apikey, category) {
-    return async function(prompt, systemInstruction, history, tools) {
+    return async function (prompt, systemInstruction, history, tools) {
         const cleanHistory = sanitiseHistoryForClaude(history);
         const { history: safeHistory, prompt: safePrompt } = trimContext(
             prompt, cleanHistory, CLAUDE_MAX_INPUT_TOKENS
         );
 
-        const messages     = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
+        const messages = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
         const systemBlocks = require('../utils/helpers').buildClaudeSystemBlocks(functionalSpec, category);
 
         const body = { model, max_tokens: MAX_OUTPUT_TOKENS_CLAUDE, system: systemBlocks, messages };
@@ -423,12 +426,12 @@ async function callClaudeViaApiKeyInner(model, functionalSpec, apikey, category)
         }
 
         const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method:  'POST',
+            method: 'POST',
             headers: {
-                'x-api-key':         apikey,
+                'x-api-key': apikey,
                 'anthropic-version': '2023-06-01',
-                'anthropic-beta':    'prompt-caching-2024-07-31',
-                'content-type':      'application/json'
+                'anthropic-beta': 'prompt-caching-2024-07-31',
+                'content-type': 'application/json'
             },
             body: JSON.stringify(body)
         });
@@ -438,11 +441,11 @@ async function callClaudeViaApiKeyInner(model, functionalSpec, apikey, category)
             throw new Error(`Claude API returned ${response.status}: ${errBody.slice(0, 200)}`);
         }
 
-        const data          = await response.json();
+        const data = await response.json();
         const contentBlocks = data?.content || [];
-        const text          = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('');
-        const toolUses      = contentBlocks.filter(b => b.type === 'tool_use');
-        const toolCalls     = toolUses.length > 0
+        const text = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('');
+        const toolUses = contentBlocks.filter(b => b.type === 'tool_use');
+        const toolCalls = toolUses.length > 0
             ? toolUses.map(b => ({ id: b.id, name: b.name, arguments: b.input }))
             : null;
 
@@ -463,17 +466,17 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
     // the direct API-key fallback below, where the model id is sent explicitly.
     try {
         const providerFn = await callClaudeViaGenHubInner(functionalSpec);
-        const content    = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
+        const content = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
         return { modelId: 'claude', content, latency: Date.now() - start, model: 'genhub-fixed-deployment' };
     } catch (hubErr) {
         console.warn('callClaude: GenAI Hub failed, falling back to API key:', hubErr?.message);
         try {
-            const dest    = await getCachedDestination('claude_api');
-            const apikey  = dest.originalProperties?.apikey;
+            const dest = await getCachedDestination('claude_api');
+            const apikey = dest.originalProperties?.apikey;
             if (!apikey) throw new Error('Claude API key destination is not configured correctly.');
 
             const providerFn = await callClaudeViaApiKeyInner(model, functionalSpec, apikey, category);
-            const content    = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
+            const content = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
             return { modelId: 'claude', content, latency: Date.now() - start, model };
         } catch (fallbackErr) {
             console.error('callClaude: fallback also failed:', fallbackErr?.message);
@@ -511,17 +514,17 @@ function buildGPTMessages(systemInstruction, history, prompt) {
                 role: 'assistant',
                 content: m.content || null,
                 tool_calls: m.toolCalls.map(tc => ({
-                    id:       tc.id,
-                    type:     'function',
+                    id: tc.id,
+                    type: 'function',
                     function: { name: tc.name, arguments: JSON.stringify(tc.arguments) }
                 }))
             });
         } else if (m.role === 'tool') {
             for (const r of m.results) {
                 messages.push({
-                    role:         'tool',
+                    role: 'tool',
                     tool_call_id: r.toolCallId,
-                    content:      r.result
+                    content: r.result
                 });
             }
         } else if (m.role === 'user' || m.role === 'assistant') {
@@ -535,35 +538,35 @@ function buildGPTMessages(systemInstruction, history, prompt) {
 
 // Inner provider fn used by agenticToolLoop for GPT-4o
 function callGPT4oInner(systemInstruction) {
-    return async function(prompt, _sysInstr, history, tools) {
+    return async function (prompt, _sysInstr, history, tools) {
         const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, history, GPT_MAX_INPUT_TOKENS);
         const messages = buildGPTMessages(systemInstruction, safeHistory, safePrompt);
 
         const body = { model: 'gpt-5.2', temperature: 0.5, messages };
         if (tools.length > 0) {
-            body.tools       = mcpToolsToGPTFormat(tools);
+            body.tools = mcpToolsToGPTFormat(tools);
             body.tool_choice = 'auto';
         }
 
         const response = await executeHttpRequest(
             { destinationName: 'GENERATIVE_AI_HUB' },
             {
-                method:  'POST',
+                method: 'POST',
                 url: `/inference/deployments/${GENHUB_GPT_DEPLOYMENT}/chat/completions?api-version=2024-02-15-preview`,
                 headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
-                data:    body
+                data: body
             },
             { fetchCsrfToken: false }
         );
 
-        const choice     = response.data?.choices?.[0];
-        const message    = choice?.message || {};
-        const text       = message.content || '';
-        const rawCalls   = message.tool_calls || [];
-        const toolCalls  = rawCalls.length > 0
+        const choice = response.data?.choices?.[0];
+        const message = choice?.message || {};
+        const text = message.content || '';
+        const rawCalls = message.tool_calls || [];
+        const toolCalls = rawCalls.length > 0
             ? rawCalls.map(tc => ({
-                id:        tc.id,
-                name:      tc.function.name,
+                id: tc.id,
+                name: tc.function.name,
                 arguments: JSON.parse(tc.function.arguments || '{}')
             }))
             : null;
@@ -577,7 +580,7 @@ async function callGPT4o(sessionId, prompt, systemInstruction, history = []) {
     const start = Date.now();
     try {
         const providerFn = callGPT4oInner(systemInstruction);
-        const content    = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
+        const content = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
         return { modelId: 'gpt4o', content, latency: Date.now() - start };
     } catch (err) {
         console.error('callGPT4o error:', err?.message);
@@ -589,15 +592,15 @@ async function callGPT4o(sessionId, prompt, systemInstruction, history = []) {
 async function callSAPGenAIHub(sessionId, prompt, systemInstruction, history = []) {
     const start = Date.now();
     try {
-        const openai   = await cds.connect.to('perplexity');
+        const openai = await cds.connect.to('perplexity');
         const messages = [
             { role: 'system', content: systemInstruction },
             ...history,
             { role: 'user', content: prompt }
         ];
         const response = await openai.send({
-            query:   'POST /chat/completions?api-version=2024-02-15-preview',
-            data:    { model: 'sonar', max_tokens: 2000, temperature: 0.5, messages },
+            query: 'POST /chat/completions?api-version=2024-02-15-preview',
+            data: { model: 'sonar', max_tokens: 2000, temperature: 0.5, messages },
             headers: { 'AI-Resource-Group': 'default', 'Content-Type': 'application/json' }
         });
 
