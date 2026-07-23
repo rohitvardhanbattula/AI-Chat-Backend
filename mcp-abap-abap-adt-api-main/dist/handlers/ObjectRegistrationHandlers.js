@@ -25,35 +25,27 @@ class ObjectRegistrationHandlers extends BaseHandler_1.BaseHandler {
                     },
                     required: ['objectUrl']
                 }
-            },
-            {
-                name: 'validateNewObject',
-                description: 'Validate parameters for a new ABAP object',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        options: { type: 'string' }
-                    },
-                    required: ['options']
-                }
-            },
-            {
-                name: 'createObject',
-                description: 'Create a new ABAP object',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        objtype: { type: 'string' },
-                        name: { type: 'string' },
-                        parentName: { type: 'string' },
-                        description: { type: 'string' },
-                        parentPath: { type: 'string' },
-                        responsible: { type: 'string', optional: true },
-                        transport: { type: 'string', optional: true }
-                    },
-                    required: ['objtype', 'name', 'parentName', 'description', 'parentPath']
-                }
             }
+            // [READ-ONLY] Write tools disabled:
+            // {
+            //     name: 'validateNewObject',
+            //     description: 'Validate parameters for a new ABAP object',
+            //     inputSchema: { type: 'object', properties: { options: { type: 'string' } }, required: ['options'] }
+            // },
+            // {
+            //     name: 'createObject',
+            //     description: 'Create a new ABAP object',
+            //     inputSchema: {
+            //         type: 'object',
+            //         properties: {
+            //             objtype: { type: 'string' }, name: { type: 'string' },
+            //             parentName: { type: 'string' }, description: { type: 'string' },
+            //             parentPath: { type: 'string' }, responsible: { type: 'string', optional: true },
+            //             transport: { type: 'string', optional: true }
+            //         },
+            //         required: ['objtype', 'name', 'parentName', 'description', 'parentPath']
+            //     }
+           // }
         ];
     }
     handle(toolName, args) {
@@ -61,10 +53,11 @@ class ObjectRegistrationHandlers extends BaseHandler_1.BaseHandler {
             switch (toolName) {
                 case 'objectRegistrationInfo':
                     return this.handleObjectRegistrationInfo(args);
-                case 'validateNewObject':
-                    return this.handleValidateNewObject(args);
-                case 'createObject':
-                    return this.handleCreateObject(args);
+                // [READ-ONLY] Write tools disabled:
+                // case 'validateNewObject':
+                //     return this.handleValidateNewObject(args);
+                // case 'createObject':
+                //     return this.handleCreateObject(args);
                 default:
                     throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown object registration tool: ${toolName}`);
             }
@@ -92,49 +85,49 @@ class ObjectRegistrationHandlers extends BaseHandler_1.BaseHandler {
             }
         });
     }
-    handleValidateNewObject(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.validateNewObject(args.options);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [{
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to validate new object: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleCreateObject(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.createObject(args.objtype, args.name, args.parentName, args.description, args.parentPath, args.responsible, args.transport);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [{
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create object: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleValidateNewObject(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.validateNewObject(args.options);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [{
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to validate new object: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleCreateObject(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.createObject(args.objtype, args.name, args.parentName, args.description, args.parentPath, args.responsible, args.transport);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [{
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create object: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
 }
 exports.ObjectRegistrationHandlers = ObjectRegistrationHandlers;

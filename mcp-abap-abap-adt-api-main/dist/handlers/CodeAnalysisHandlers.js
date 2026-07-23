@@ -158,18 +158,8 @@ class CodeAnalysisHandlers extends BaseHandler_js_1.BaseHandler {
                     required: ['url', 'source', 'line', 'column']
                 }
             },
-            {
-                name: 'fixEdits',
-                description: 'Applies fix edits.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        proposal: { type: 'string' },
-                        source: { type: 'string' }
-                    },
-                    required: ['proposal', 'source']
-                }
-            },
+            // [READ-ONLY] Write tool disabled:
+            // { name: 'fixEdits', description: 'Applies fix edits.', ... },
             {
                 name: 'fragmentMappings',
                 description: 'Retrieves fragment mappings.',
@@ -225,8 +215,9 @@ class CodeAnalysisHandlers extends BaseHandler_js_1.BaseHandler {
                     return this.handleUsageReferenceSnippets(args);
                 case 'fixProposals':
                     return this.handleFixProposals(args);
-                case 'fixEdits':
-                    return this.handleFixEdits(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'fixEdits':
+                //     return this.handleFixEdits(args);
                 case 'fragmentMappings':
                     return this.handleFragmentMappings(args);
                 case 'abapDocumentation':
@@ -500,30 +491,30 @@ class CodeAnalysisHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleFixEdits(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.fixEdits(args.proposal, args.source);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Fix edits failed: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleFixEdits(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.fixEdits(args.proposal, args.source);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Fix edits failed: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
     handleFragmentMappings(args) {
         return __awaiter(this, void 0, void 0, function* () {
             const startTime = performance.now();

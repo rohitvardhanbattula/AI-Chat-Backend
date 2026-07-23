@@ -99,63 +99,12 @@ class TraceHandlers extends BaseHandler_js_1.BaseHandler {
                     },
                     required: ['id']
                 }
-            },
-            {
-                name: 'tracesSetParameters',
-                description: 'Sets trace parameters.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        parameters: {
-                            type: 'string',
-                            description: 'The trace parameters.'
-                        }
-                    },
-                    required: ['parameters']
-                }
-            },
-            {
-                name: 'tracesCreateConfiguration',
-                description: 'Creates a trace configuration.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        config: {
-                            type: 'string',
-                            description: 'The trace configuration.'
-                        }
-                    },
-                    required: ['config']
-                }
-            },
-            {
-                name: 'tracesDeleteConfiguration',
-                description: 'Deletes a trace configuration.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        id: {
-                            type: 'string',
-                            description: 'The ID of the trace configuration.'
-                        }
-                    },
-                    required: ['id']
-                }
-            },
-            {
-                name: 'tracesDelete',
-                description: 'Deletes a trace.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        id: {
-                            type: 'string',
-                            description: 'The ID of the trace.'
-                        }
-                    },
-                    required: ['id']
-                }
             }
+            // [READ-ONLY] Write tools disabled:
+            // { name: 'tracesSetParameters', ... },
+            // { name: 'tracesCreateConfiguration', ... },
+            // { name: 'tracesDeleteConfiguration', ... },
+            // { name: 'tracesDelete', ... }
         ];
     }
     handle(toolName, args) {
@@ -171,14 +120,11 @@ class TraceHandlers extends BaseHandler_js_1.BaseHandler {
                     return this.handleTracesDbAccess(args);
                 case 'tracesStatements':
                     return this.handleTracesStatements(args);
-                case 'tracesSetParameters':
-                    return this.handleTracesSetParameters(args);
-                case 'tracesCreateConfiguration':
-                    return this.handleTracesCreateConfiguration(args);
-                case 'tracesDeleteConfiguration':
-                    return this.handleTracesDeleteConfiguration(args);
-                case 'tracesDelete':
-                    return this.handleTracesDelete(args);
+                // [READ-ONLY] Write tools disabled:
+                // case 'tracesSetParameters': return this.handleTracesSetParameters(args);
+                // case 'tracesCreateConfiguration': return this.handleTracesCreateConfiguration(args);
+                // case 'tracesDeleteConfiguration': return this.handleTracesDeleteConfiguration(args);
+                // case 'tracesDelete': return this.handleTracesDelete(args);
                 default:
                     throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown trace tool: ${toolName}`);
             }
@@ -304,101 +250,101 @@ class TraceHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleTracesSetParameters(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.tracesSetParameters(args.parameters);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set trace parameters: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleTracesCreateConfiguration(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.tracesCreateConfiguration(args.config);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create trace configuration: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleTracesDeleteConfiguration(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.tracesDeleteConfiguration(args.id);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to delete trace configuration: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleTracesDelete(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.tracesDelete(args.id);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to delete trace: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleTracesSetParameters(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.tracesSetParameters(args.parameters);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set trace parameters: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleTracesCreateConfiguration(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.tracesCreateConfiguration(args.config);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create trace configuration: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleTracesDeleteConfiguration(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.tracesDeleteConfiguration(args.id);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to delete trace configuration: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleTracesDelete(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.tracesDelete(args.id);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to delete trace: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
 }
 exports.TraceHandlers = TraceHandlers;

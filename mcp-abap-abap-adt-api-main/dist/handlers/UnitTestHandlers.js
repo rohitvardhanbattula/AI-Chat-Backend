@@ -70,30 +70,9 @@ class UnitTestHandlers extends BaseHandler_js_1.BaseHandler {
                     },
                     required: ['url', 'source']
                 }
-            },
-            {
-                name: 'createTestInclude',
-                description: 'Creates a test include for a class.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clas: {
-                            type: 'string',
-                            description: 'The class name.'
-                        },
-                        lockHandle: {
-                            type: 'string',
-                            description: 'The lock handle.'
-                        },
-                        transport: {
-                            type: 'string',
-                            description: 'The transport.',
-                            optional: true
-                        }
-                    },
-                    required: ['clas', 'lockHandle']
-                }
             }
+            // [READ-ONLY] Write tool disabled:
+            // { name: 'createTestInclude', ... requires lock handle (write operation) }
         ];
     }
     handle(toolName, args) {
@@ -105,8 +84,9 @@ class UnitTestHandlers extends BaseHandler_js_1.BaseHandler {
                     return this.handleUnitTestEvaluation(args);
                 case 'unitTestOccurrenceMarkers':
                     return this.handleUnitTestOccurrenceMarkers(args);
-                case 'createTestInclude':
-                    return this.handleCreateTestInclude(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'createTestInclude':
+                //     return this.handleCreateTestInclude(args);
                 default:
                     throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown unit test tool: ${toolName}`);
             }
@@ -184,30 +164,30 @@ class UnitTestHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleCreateTestInclude(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.createTestInclude(args.clas, args.lockHandle, args.transport);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result,
-                                message: 'Test include created successfully'
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create test include: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleCreateTestInclude(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.createTestInclude(args.clas, args.lockHandle, args.transport);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result,
+    //                                 message: 'Test include created successfully'
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create test include: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
 }
 exports.UnitTestHandlers = UnitTestHandlers;

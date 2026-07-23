@@ -59,21 +59,10 @@ class RenameHandlers extends BaseHandler_js_1.BaseHandler {
                     },
                     required: ['renameRefactoring']
                 }
-            },
-            {
-                name: 'renameExecute',
-                description: 'Executes a rename refactoring.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        refactoring: {
-                            type: 'object',
-                            description: 'The rename refactoring.'
-                        }
-                    },
-                    required: ['refactoring']
-                }
             }
+            // [READ-ONLY] Write tool disabled:
+            // { name: 'renameExecute', description: 'Executes a rename refactoring.',
+            //   inputSchema: { type: 'object', properties: { refactoring: { type: 'object' } }, required: ['refactoring'] } }
         ];
     }
     handle(toolName, args) {
@@ -83,8 +72,9 @@ class RenameHandlers extends BaseHandler_js_1.BaseHandler {
                     return this.handleRenameEvaluate(args);
                 case 'renamePreview':
                     return this.handleRenamePreview(args);
-                case 'renameExecute':
-                    return this.handleRenameExecute(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'renameExecute':
+                //     return this.handleRenameExecute(args);
                 default:
                     throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown rename tool: ${toolName}`);
             }
@@ -138,29 +128,29 @@ class RenameHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleRenameExecute(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.renameExecute(args.refactoring);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to execute rename: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleRenameExecute(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.renameExecute(args.refactoring);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to execute rename: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
 }
 exports.RenameHandlers = RenameHandlers;

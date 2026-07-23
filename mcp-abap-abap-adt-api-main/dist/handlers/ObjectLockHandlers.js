@@ -1,3 +1,7 @@
+// [READ-ONLY MODE] This handler file is DISABLED.
+// All tools in this file perform write/mutating operations against the SAP system.
+// The file is kept for reference but is NOT loaded or instantiated (see index.js).
+
 "use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }

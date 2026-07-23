@@ -26,21 +26,22 @@ class ObjectSourceHandlers extends BaseHandler_1.BaseHandler {
                     },
                     required: ['objectSourceUrl']
                 }
-            },
-            {
-                name: 'setObjectSource',
-                description: 'Sets source code for ABAP objects',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        objectSourceUrl: { type: 'string' },
-                        source: { type: 'string' },
-                        lockHandle: { type: 'string' },
-                        transport: { type: 'string' }
-                    },
-                    required: ['objectSourceUrl', 'source', 'lockHandle']
-                }
             }
+            // [READ-ONLY] Write tool disabled:
+            // {
+            //     name: 'setObjectSource',
+            //     description: 'Sets source code for ABAP objects',
+            //     inputSchema: {
+            //         type: 'object',
+            //         properties: {
+            //             objectSourceUrl: { type: 'string' },
+            //             source: { type: 'string' },
+            //             lockHandle: { type: 'string' },
+            //             transport: { type: 'string' }
+            //         },
+            //         required: ['objectSourceUrl', 'source', 'lockHandle']
+            //     }
+            // }
         ];
     }
     handle(toolName, args) {
@@ -48,8 +49,9 @@ class ObjectSourceHandlers extends BaseHandler_1.BaseHandler {
             switch (toolName) {
                 case 'getObjectSource':
                     return this.handleGetObjectSource(args);
-                case 'setObjectSource':
-                    return this.handleSetObjectSource(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'setObjectSource':
+                //     return this.handleSetObjectSource(args);
                 default:
                     throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown object source tool: ${toolName}`);
             }
@@ -79,29 +81,29 @@ class ObjectSourceHandlers extends BaseHandler_1.BaseHandler {
             }
         });
     }
-    handleSetObjectSource(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                yield this.adtclient.setObjectSource(args.objectSourceUrl, args.source, args.lockHandle, args.transport);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                updated: true
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set object source: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleSetObjectSource(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 yield this.adtclient.setObjectSource(args.objectSourceUrl, args.source, args.lockHandle, args.transport);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 updated: true
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set object source: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
 }
 exports.ObjectSourceHandlers = ObjectSourceHandlers;

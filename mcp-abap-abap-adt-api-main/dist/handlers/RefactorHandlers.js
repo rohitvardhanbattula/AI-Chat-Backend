@@ -46,21 +46,10 @@ class RefactorHandlers extends BaseHandler_js_1.BaseHandler {
                     },
                     required: ['proposal']
                 }
-            },
-            {
-                name: 'extractMethodExecute',
-                description: 'Executes an extract method refactoring.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        refactoring: {
-                            type: 'string',
-                            description: 'The refactoring object.'
-                        }
-                    },
-                    required: ['refactoring']
-                }
             }
+            // [READ-ONLY] Write tool disabled:
+            // { name: 'extractMethodExecute', description: 'Executes an extract method refactoring.',
+            //   inputSchema: { type: 'object', properties: { refactoring: { type: 'string' } }, required: ['refactoring'] } }
         ];
     }
     handle(toolName, args) {
@@ -70,8 +59,9 @@ class RefactorHandlers extends BaseHandler_js_1.BaseHandler {
                     return this.handleExtractMethodEvaluate(args);
                 case 'extractMethodPreview':
                     return this.handleExtractMethodPreview(args);
-                case 'extractMethodExecute':
-                    return this.handleExtractMethodExecute(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'extractMethodExecute':
+                //     return this.handleExtractMethodExecute(args);
                 default:
                     throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown refactor tool: ${toolName}`);
             }
@@ -125,29 +115,29 @@ class RefactorHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleExtractMethodExecute(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.extractMethodExecute(args.refactoring);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to execute extract method: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleExtractMethodExecute(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.extractMethodExecute(args.refactoring);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to execute extract method: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
 }
 exports.RefactorHandlers = RefactorHandlers;

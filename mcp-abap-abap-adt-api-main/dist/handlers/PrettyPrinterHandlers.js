@@ -23,24 +23,8 @@ class PrettyPrinterHandlers extends BaseHandler_js_1.BaseHandler {
                     properties: {}
                 }
             },
-            {
-                name: 'setPrettyPrinterSetting',
-                description: 'Sets the pretty printer settings.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        indent: {
-                            type: 'boolean',
-                            description: 'Whether to indent the code.'
-                        },
-                        style: {
-                            type: 'string',
-                            description: 'The pretty printer style.'
-                        }
-                    },
-                    required: ['indent', 'style']
-                }
-            },
+            // [READ-ONLY] Write tool disabled:
+            // { name: 'setPrettyPrinterSetting', description: 'Sets the pretty printer settings.', ... },
             {
                 name: 'prettyPrinter',
                 description: 'Formats ABAP code using the pretty printer.',
@@ -62,8 +46,9 @@ class PrettyPrinterHandlers extends BaseHandler_js_1.BaseHandler {
             switch (toolName) {
                 case 'prettyPrinterSetting':
                     return this.handlePrettyPrinterSetting(args);
-                case 'setPrettyPrinterSetting':
-                    return this.handleSetPrettyPrinterSetting(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'setPrettyPrinterSetting':
+                //     return this.handleSetPrettyPrinterSetting(args);
                 case 'prettyPrinter':
                     return this.handlePrettyPrinter(args);
                 default:
@@ -95,30 +80,30 @@ class PrettyPrinterHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleSetPrettyPrinterSetting(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.setPrettyPrinterSetting(args.indent, args.style);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set pretty printer settings: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleSetPrettyPrinterSetting(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.setPrettyPrinterSetting(args.indent, args.style);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set pretty printer settings: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
     handlePrettyPrinter(args) {
         return __awaiter(this, void 0, void 0, function* () {
             const startTime = performance.now();

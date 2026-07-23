@@ -39,33 +39,34 @@ class TransportHandlers extends BaseHandler_js_1.BaseHandler {
                     required: ['objSourceUrl']
                 }
             },
-            {
-                name: 'createTransport',
-                description: 'Create a new transport request',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        objSourceUrl: {
-                            type: 'string',
-                            description: 'URL of the object source'
-                        },
-                        REQUEST_TEXT: {
-                            type: 'string',
-                            description: 'Description of the transport request'
-                        },
-                        DEVCLASS: {
-                            type: 'string',
-                            description: 'Development class'
-                        },
-                        transportLayer: {
-                            type: 'string',
-                            description: 'Transport layer',
-                            optional: true
-                        }
-                    },
-                    required: ['objSourceUrl', 'REQUEST_TEXT', 'DEVCLASS']
-                }
-            },
+            // [READ-ONLY] Write tool disabled: createTransport
+            // {
+            // name: 'createTransport',
+            // description: 'Create a new transport request',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // objSourceUrl: {
+            // type: 'string',
+            // description: 'URL of the object source'
+            // },
+            // REQUEST_TEXT: {
+            // type: 'string',
+            // description: 'Description of the transport request'
+            // },
+            // DEVCLASS: {
+            // type: 'string',
+            // description: 'Development class'
+            // },
+            // transportLayer: {
+            // type: 'string',
+            // description: 'Transport layer',
+            // optional: true
+            // }
+            // },
+            // required: ['objSourceUrl', 'REQUEST_TEXT', 'DEVCLASS']
+            // }
+            // },
             {
                 name: 'hasTransportConfig',
                 description: 'Check if transport configuration exists',
@@ -96,36 +97,38 @@ class TransportHandlers extends BaseHandler_js_1.BaseHandler {
                     required: ['url']
                 }
             },
-            {
-                name: 'setTransportsConfig',
-                description: 'Sets transport configurations.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        uri: {
-                            type: 'string',
-                            description: 'The URI for the transport configuration.'
-                        },
-                        etag: {
-                            type: 'string',
-                            description: 'The ETag for the transport configuration.'
-                        },
-                        config: {
-                            type: 'string',
-                            description: 'The transport configuration.'
-                        }
-                    },
-                    required: ['uri', 'etag', 'config']
-                }
-            },
-            {
-                name: 'createTransportsConfig',
-                description: 'Creates transport configurations.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {}
-                }
-            },
+            // [READ-ONLY] Write tool disabled: setTransportsConfig
+            // {
+            // name: 'setTransportsConfig',
+            // description: 'Sets transport configurations.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // uri: {
+            // type: 'string',
+            // description: 'The URI for the transport configuration.'
+            // },
+            // etag: {
+            // type: 'string',
+            // description: 'The ETag for the transport configuration.'
+            // },
+            // config: {
+            // type: 'string',
+            // description: 'The transport configuration.'
+            // }
+            // },
+            // required: ['uri', 'etag', 'config']
+            // }
+            // },
+            // [READ-ONLY] Write tool disabled: createTransportsConfig
+            // {
+            // name: 'createTransportsConfig',
+            // description: 'Creates transport configurations.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {}
+            // }
+            // },
             {
                 name: 'userTransports',
                 description: 'Retrieves transports for a user.',
@@ -164,80 +167,84 @@ class TransportHandlers extends BaseHandler_js_1.BaseHandler {
                     required: ['configUri']
                 }
             },
-            {
-                name: 'transportDelete',
-                description: 'Deletes a transport.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        transportNumber: {
-                            type: 'string',
-                            description: 'The transport number.'
-                        }
-                    },
-                    required: ['transportNumber']
-                }
-            },
-            {
-                name: 'transportRelease',
-                description: 'Releases a transport.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        transportNumber: {
-                            type: 'string',
-                            description: 'The transport number.'
-                        },
-                        ignoreLocks: {
-                            type: 'boolean',
-                            description: 'Whether to ignore locks.',
-                            optional: true
-                        },
-                        IgnoreATC: {
-                            type: 'boolean',
-                            description: 'Whether to ignore ATC checks.',
-                            optional: true
-                        }
-                    },
-                    required: ['transportNumber']
-                }
-            },
-            {
-                name: 'transportSetOwner',
-                description: 'Sets the owner of a transport.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        transportNumber: {
-                            type: 'string',
-                            description: 'The transport number.'
-                        },
-                        targetuser: {
-                            type: 'string',
-                            description: 'The target user.'
-                        }
-                    },
-                    required: ['transportNumber', 'targetuser']
-                }
-            },
-            {
-                name: 'transportAddUser',
-                description: 'Adds a user to a transport.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        transportNumber: {
-                            type: 'string',
-                            description: 'The transport number.'
-                        },
-                        user: {
-                            type: 'string',
-                            description: 'The user to add.'
-                        }
-                    },
-                    required: ['transportNumber', 'user']
-                }
-            },
+            // [READ-ONLY] Write tool disabled: transportDelete
+            // {
+            // name: 'transportDelete',
+            // description: 'Deletes a transport.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // transportNumber: {
+            // type: 'string',
+            // description: 'The transport number.'
+            // }
+            // },
+            // required: ['transportNumber']
+            // }
+            // },
+            // [READ-ONLY] Write tool disabled: transportRelease
+            // {
+            // name: 'transportRelease',
+            // description: 'Releases a transport.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // transportNumber: {
+            // type: 'string',
+            // description: 'The transport number.'
+            // },
+            // ignoreLocks: {
+            // type: 'boolean',
+            // description: 'Whether to ignore locks.',
+            // optional: true
+            // },
+            // IgnoreATC: {
+            // type: 'boolean',
+            // description: 'Whether to ignore ATC checks.',
+            // optional: true
+            // }
+            // },
+            // required: ['transportNumber']
+            // }
+            // },
+            // [READ-ONLY] Write tool disabled: transportSetOwner
+            // {
+            // name: 'transportSetOwner',
+            // description: 'Sets the owner of a transport.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // transportNumber: {
+            // type: 'string',
+            // description: 'The transport number.'
+            // },
+            // targetuser: {
+            // type: 'string',
+            // description: 'The target user.'
+            // }
+            // },
+            // required: ['transportNumber', 'targetuser']
+            // }
+            // },
+            // [READ-ONLY] Write tool disabled: transportAddUser
+            // {
+            // name: 'transportAddUser',
+            // description: 'Adds a user to a transport.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // transportNumber: {
+            // type: 'string',
+            // description: 'The transport number.'
+            // },
+            // user: {
+            // type: 'string',
+            // description: 'The user to add.'
+            // }
+            // },
+            // required: ['transportNumber', 'user']
+            // }
+            // },
             {
                 name: 'systemUsers',
                 description: 'Retrieves a list of system users.',
@@ -280,30 +287,37 @@ class TransportHandlers extends BaseHandler_js_1.BaseHandler {
             switch (toolName) {
                 case 'transportInfo':
                     return this.handleTransportInfo(args);
-                case 'createTransport':
-                    return this.handleCreateTransport(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'createTransport':
+                //     return this.handleCreateTransport(args);
                 case 'hasTransportConfig':
                     return this.handleHasTransportConfig(args);
                 case 'transportConfigurations':
                     return this.handleTransportConfigurations(args);
                 case 'getTransportConfiguration':
                     return this.handleGetTransportConfiguration(args);
-                case 'setTransportsConfig':
-                    return this.handleSetTransportsConfig(args);
-                case 'createTransportsConfig':
-                    return this.handleCreateTransportsConfig(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'setTransportsConfig':
+                //     return this.handleSetTransportsConfig(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'createTransportsConfig':
+                //     return this.handleCreateTransportsConfig(args);
                 case 'userTransports':
                     return this.handleUserTransports(args);
                 case 'transportsByConfig':
                     return this.handleTransportsByConfig(args);
-                case 'transportDelete':
-                    return this.handleTransportDelete(args);
-                case 'transportRelease':
-                    return this.handleTransportRelease(args);
-                case 'transportSetOwner':
-                    return this.handleTransportSetOwner(args);
-                case 'transportAddUser':
-                    return this.handleTransportAddUser(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'transportDelete':
+                //     return this.handleTransportDelete(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'transportRelease':
+                //     return this.handleTransportRelease(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'transportSetOwner':
+                //     return this.handleTransportSetOwner(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'transportAddUser':
+                //     return this.handleTransportAddUser(args);
                 case 'systemUsers':
                     return this.handleSystemUsers(args);
                 case 'transportReference':
@@ -337,31 +351,31 @@ class TransportHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleCreateTransport(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const transportResult = yield this.adtclient.createTransport(args.objSourceUrl, args.REQUEST_TEXT, args.DEVCLASS, args.transportLayer);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                transportNumber: transportResult,
-                                message: 'Transport created successfully'
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create transport: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleCreateTransport(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const transportResult = yield this.adtclient.createTransport(args.objSourceUrl, args.REQUEST_TEXT, args.DEVCLASS, args.transportLayer);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 transportNumber: transportResult,
+    //                                 message: 'Transport created successfully'
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create transport: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
     handleHasTransportConfig(args) {
         return __awaiter(this, void 0, void 0, function* () {
             const startTime = performance.now();
@@ -434,54 +448,54 @@ class TransportHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleSetTransportsConfig(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.setTransportsConfig(args.uri, args.etag, args.config);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set transports config: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleCreateTransportsConfig(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.createTransportsConfig();
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create transports config: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleSetTransportsConfig(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.setTransportsConfig(args.uri, args.etag, args.config);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set transports config: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleCreateTransportsConfig(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.createTransportsConfig();
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create transports config: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
     handleUserTransports(args) {
         return __awaiter(this, void 0, void 0, function* () {
             const startTime = performance.now();
@@ -530,102 +544,102 @@ class TransportHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleTransportDelete(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.transportDelete(args.transportNumber);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to delete transport: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleTransportRelease(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.transportRelease(args.transportNumber, args.ignoreLocks, args.IgnoreATC);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to release transport: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleTransportSetOwner(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.transportSetOwner(args.transportNumber, args.targetuser);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set transport owner: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleTransportAddUser(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.transportAddUser(args.transportNumber, args.user);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to add user to transport: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleTransportDelete(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.transportDelete(args.transportNumber);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to delete transport: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleTransportRelease(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.transportRelease(args.transportNumber, args.ignoreLocks, args.IgnoreATC);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to release transport: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleTransportSetOwner(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.transportSetOwner(args.transportNumber, args.targetuser);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to set transport owner: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleTransportAddUser(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.transportAddUser(args.transportNumber, args.user);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to add user to transport: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
     handleSystemUsers(args) {
         return __awaiter(this, void 0, void 0, function* () {
             const startTime = performance.now();

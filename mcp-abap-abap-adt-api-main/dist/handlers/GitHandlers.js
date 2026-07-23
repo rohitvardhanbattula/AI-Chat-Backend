@@ -47,144 +47,149 @@ class GitHandlers extends BaseHandler_js_1.BaseHandler {
                     required: ['repourl']
                 }
             },
-            {
-                name: 'gitCreateRepo',
-                description: 'Creates a new Git repository.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        packageName: {
-                            type: 'string',
-                            description: 'The name of the package.'
-                        },
-                        repourl: {
-                            type: 'string',
-                            description: 'The URL of the repository.'
-                        },
-                        branch: {
-                            type: 'string',
-                            description: 'The branch name.',
-                            optional: true
-                        },
-                        transport: {
-                            type: 'string',
-                            description: 'The transport.',
-                            optional: true
-                        },
-                        user: {
-                            type: 'string',
-                            description: 'The username.',
-                            optional: true
-                        },
-                        password: {
-                            type: 'string',
-                            description: 'The password.',
-                            optional: true
-                        }
-                    },
-                    required: ['packageName', 'repourl']
-                }
-            },
-            {
-                name: 'gitPullRepo',
-                description: 'Pulls changes from a Git repository.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        repoId: {
-                            type: 'string',
-                            description: 'The ID of the repository.'
-                        },
-                        branch: {
-                            type: 'string',
-                            description: 'The branch name.',
-                            optional: true
-                        },
-                        transport: {
-                            type: 'string',
-                            description: 'The transport.',
-                            optional: true
-                        },
-                        user: {
-                            type: 'string',
-                            description: 'The username.',
-                            optional: true
-                        },
-                        password: {
-                            type: 'string',
-                            description: 'The password.',
-                            optional: true
-                        }
-                    },
-                    required: ['repoId']
-                }
-            },
-            {
-                name: 'gitUnlinkRepo',
-                description: 'Unlinks a Git repository.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        repoId: {
-                            type: 'string',
-                            description: 'The ID of the repository.'
-                        }
-                    },
-                    required: ['repoId']
-                }
-            },
-            {
-                name: 'stageRepo',
-                description: 'Stages changes in a Git repository.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        repo: {
-                            type: 'object',
-                            description: 'The Git repository object.'
-                        },
-                        user: {
-                            type: 'string',
-                            description: 'The username.',
-                            optional: true
-                        },
-                        password: {
-                            type: 'string',
-                            description: 'The password.',
-                            optional: true
-                        }
-                    },
-                    required: ['repo']
-                }
-            },
-            {
-                name: 'pushRepo',
-                description: 'Pushes changes to a Git repository.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        repo: {
-                            type: 'object',
-                            description: 'The Git repository object.'
-                        },
-                        staging: {
-                            type: 'object',
-                            description: 'The staging information object.'
-                        },
-                        user: {
-                            type: 'string',
-                            description: 'The username.',
-                            optional: true
-                        },
-                        password: {
-                            type: 'string',
-                            description: 'The password.',
-                            optional: true
-                        }
-                    },
-                    required: ['repo', 'staging']
-                }
-            },
+            // [READ-ONLY] Write tool disabled: gitCreateRepo
+            // {
+            // name: 'gitCreateRepo',
+            // description: 'Creates a new Git repository.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // packageName: {
+            // type: 'string',
+            // description: 'The name of the package.'
+            // },
+            // repourl: {
+            // type: 'string',
+            // description: 'The URL of the repository.'
+            // },
+            // branch: {
+            // type: 'string',
+            // description: 'The branch name.',
+            // optional: true
+            // },
+            // transport: {
+            // type: 'string',
+            // description: 'The transport.',
+            // optional: true
+            // },
+            // user: {
+            // type: 'string',
+            // description: 'The username.',
+            // optional: true
+            // },
+            // password: {
+            // type: 'string',
+            // description: 'The password.',
+            // optional: true
+            // }
+            // },
+            // required: ['packageName', 'repourl']
+            // }
+            // },
+            // [READ-ONLY] Write tool disabled: gitPullRepo
+            // {
+            // name: 'gitPullRepo',
+            // description: 'Pulls changes from a Git repository.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // repoId: {
+            // type: 'string',
+            // description: 'The ID of the repository.'
+            // },
+            // branch: {
+            // type: 'string',
+            // description: 'The branch name.',
+            // optional: true
+            // },
+            // transport: {
+            // type: 'string',
+            // description: 'The transport.',
+            // optional: true
+            // },
+            // user: {
+            // type: 'string',
+            // description: 'The username.',
+            // optional: true
+            // },
+            // password: {
+            // type: 'string',
+            // description: 'The password.',
+            // optional: true
+            // }
+            // },
+            // required: ['repoId']
+            // }
+            // },
+            // [READ-ONLY] Write tool disabled: gitUnlinkRepo
+            // {
+            // name: 'gitUnlinkRepo',
+            // description: 'Unlinks a Git repository.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // repoId: {
+            // type: 'string',
+            // description: 'The ID of the repository.'
+            // }
+            // },
+            // required: ['repoId']
+            // }
+            // },
+            // [READ-ONLY] Write tool disabled: stageRepo
+            // {
+            // name: 'stageRepo',
+            // description: 'Stages changes in a Git repository.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // repo: {
+            // type: 'object',
+            // description: 'The Git repository object.'
+            // },
+            // user: {
+            // type: 'string',
+            // description: 'The username.',
+            // optional: true
+            // },
+            // password: {
+            // type: 'string',
+            // description: 'The password.',
+            // optional: true
+            // }
+            // },
+            // required: ['repo']
+            // }
+            // },
+            // [READ-ONLY] Write tool disabled: pushRepo
+            // {
+            // name: 'pushRepo',
+            // description: 'Pushes changes to a Git repository.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // repo: {
+            // type: 'object',
+            // description: 'The Git repository object.'
+            // },
+            // staging: {
+            // type: 'object',
+            // description: 'The staging information object.'
+            // },
+            // user: {
+            // type: 'string',
+            // description: 'The username.',
+            // optional: true
+            // },
+            // password: {
+            // type: 'string',
+            // description: 'The password.',
+            // optional: true
+            // }
+            // },
+            // required: ['repo', 'staging']
+            // }
+            // },
             {
                 name: 'checkRepo',
                 description: 'Checks a Git repository.',
@@ -233,39 +238,40 @@ class GitHandlers extends BaseHandler_js_1.BaseHandler {
                     required: ['repo']
                 }
             },
-            {
-                name: 'switchRepoBranch',
-                description: 'Switches the branch of a Git repository.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        repo: {
-                            type: 'string',
-                            description: 'The Git repository.'
-                        },
-                        branch: {
-                            type: 'string',
-                            description: 'The branch name.'
-                        },
-                        create: {
-                            type: 'boolean',
-                            description: 'Whether to create the branch if it doesn\'t exist.',
-                            optional: true
-                        },
-                        user: {
-                            type: 'string',
-                            description: 'The username.',
-                            optional: true
-                        },
-                        password: {
-                            type: 'string',
-                            description: 'The password.',
-                            optional: true
-                        }
-                    },
-                    required: ['repo', 'branch']
-                }
-            }
+            // [READ-ONLY] Write tool disabled: switchRepoBranch
+            // {
+            // name: 'switchRepoBranch',
+            // description: 'Switches the branch of a Git repository.',
+            // inputSchema: {
+            // type: 'object',
+            // properties: {
+            // repo: {
+            // type: 'string',
+            // description: 'The Git repository.'
+            // },
+            // branch: {
+            // type: 'string',
+            // description: 'The branch name.'
+            // },
+            // create: {
+            // type: 'boolean',
+            // description: 'Whether to create the branch if it doesn\'t exist.',
+            // optional: true
+            // },
+            // user: {
+            // type: 'string',
+            // description: 'The username.',
+            // optional: true
+            // },
+            // password: {
+            // type: 'string',
+            // description: 'The password.',
+            // optional: true
+            // }
+            // },
+            // required: ['repo', 'branch']
+            // }
+            // }
         ];
     }
     handle(toolName, args) {
@@ -275,22 +281,22 @@ class GitHandlers extends BaseHandler_js_1.BaseHandler {
                     return this.handleGitRepos(args);
                 case 'gitExternalRepoInfo':
                     return this.handleGitExternalRepoInfo(args);
-                case 'gitCreateRepo':
-                    return this.handleGitCreateRepo(args);
-                case 'gitPullRepo':
-                    return this.handleGitPullRepo(args);
-                case 'gitUnlinkRepo':
-                    return this.handleGitUnlinkRepo(args);
-                case 'stageRepo':
-                    return this.handleStageRepo(args);
-                case 'pushRepo':
-                    return this.handlePushRepo(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'gitCreateRepo': return this.handleGitCreateRepo(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'gitPullRepo': return this.handleGitPullRepo(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'gitUnlinkRepo': return this.handleGitUnlinkRepo(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'stageRepo': return this.handleStageRepo(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'pushRepo': return this.handlePushRepo(args);
                 case 'checkRepo':
                     return this.handleCheckRepo(args);
                 case 'remoteRepoInfo':
                     return this.handleRemoteRepoInfo(args);
-                case 'switchRepoBranch':
-                    return this.handleSwitchRepoBranch(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'switchRepoBranch': return this.handleSwitchRepoBranch(args);
                 default:
                     throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown git tool: ${toolName}`);
             }
@@ -344,126 +350,126 @@ class GitHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleGitCreateRepo(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.gitCreateRepo(args.packageName, args.repourl, args.branch, args.transport, args.user, args.password);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create git repo: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleGitPullRepo(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.gitPullRepo(args.repoId, args.branch, args.transport, args.user, args.password);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to pull git repo: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleGitUnlinkRepo(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.gitUnlinkRepo(args.repoId);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to unlink git repo: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handleStageRepo(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.stageRepo(args.repo, args.user, args.password);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to stage repo: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
-    handlePushRepo(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.pushRepo(args.repo, args.staging, args.user, args.password);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to push repo: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleGitCreateRepo(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.gitCreateRepo(args.packageName, args.repourl, args.branch, args.transport, args.user, args.password);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to create git repo: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleGitPullRepo(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.gitPullRepo(args.repoId, args.branch, args.transport, args.user, args.password);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to pull git repo: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleGitUnlinkRepo(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.gitUnlinkRepo(args.repoId);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to unlink git repo: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handleStageRepo(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.stageRepo(args.repo, args.user, args.password);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to stage repo: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
+    //     handlePushRepo(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.pushRepo(args.repo, args.staging, args.user, args.password);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to push repo: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
     handleCheckRepo(args) {
         return __awaiter(this, void 0, void 0, function* () {
             const startTime = performance.now();
@@ -512,29 +518,29 @@ class GitHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleSwitchRepoBranch(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.switchRepoBranch(args.repo, args.branch, args.create, args.user, args.password);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to switch repo branch: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleSwitchRepoBranch(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.switchRepoBranch(args.repo, args.branch, args.create, args.user, args.password);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to switch repo branch: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
 }
 exports.GitHandlers = GitHandlers;

@@ -111,20 +111,8 @@ class AtcHandlers extends BaseHandler_js_1.BaseHandler {
                     required: ['markerId']
                 }
             },
-            {
-                name: 'atcRequestExemption',
-                description: 'Requests an ATC exemption.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        proposal: {
-                            type: 'object',
-                            description: 'The ATC exemption proposal.'
-                        }
-                    },
-                    required: ['proposal']
-                }
-            },
+            // [READ-ONLY] Write tool disabled:
+            // { name: 'atcRequestExemption', ... },
             {
                 name: 'isProposalMessage',
                 description: 'Checks if a given object is a proposal message.',
@@ -152,25 +140,9 @@ class AtcHandlers extends BaseHandler_js_1.BaseHandler {
                     },
                     required: ['findingUri']
                 }
-            },
-            {
-                name: 'atcChangeContact',
-                description: 'Changes the contact for an ATC finding.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        itemUri: {
-                            type: 'string',
-                            description: 'The URI of the item.'
-                        },
-                        userId: {
-                            type: 'string',
-                            description: 'The ID of the user.'
-                        }
-                    },
-                    required: ['itemUri', 'userId']
-                }
             }
+            // [READ-ONLY] Write tool disabled:
+            // { name: 'atcChangeContact', ... }
         ];
     }
     handle(toolName, args) {
@@ -188,14 +160,16 @@ class AtcHandlers extends BaseHandler_js_1.BaseHandler {
                     return this.handleAtcUsers(args);
                 case 'atcExemptProposal':
                     return this.handleAtcExemptProposal(args);
-                case 'atcRequestExemption':
-                    return this.handleAtcRequestExemption(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'atcRequestExemption':
+                //     return this.handleAtcRequestExemption(args);
                 case 'isProposalMessage':
                     return this.handleIsProposalMessage(args);
                 case 'atcContactUri':
                     return this.handleAtcContactUri(args);
-                case 'atcChangeContact':
-                    return this.handleAtcChangeContact(args);
+                // [READ-ONLY] Write tool disabled:
+                // case 'atcChangeContact':
+                //     return this.handleAtcChangeContact(args);
                 default:
                     throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown ATC tool: ${toolName}`);
             }
@@ -345,30 +319,30 @@ class AtcHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleAtcRequestExemption(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.atcRequestExemption(args.proposal);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to request ATC exemption: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleAtcRequestExemption(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.atcRequestExemption(args.proposal);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to request ATC exemption: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
     handleIsProposalMessage(args) {
         return __awaiter(this, void 0, void 0, function* () {
             const startTime = performance.now();
@@ -417,29 +391,29 @@ class AtcHandlers extends BaseHandler_js_1.BaseHandler {
             }
         });
     }
-    handleAtcChangeContact(args) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const startTime = performance.now();
-            try {
-                const result = yield this.adtclient.atcChangeContact(args.itemUri, args.userId);
-                this.trackRequest(startTime, true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                status: 'success',
-                                result
-                            })
-                        }
-                    ]
-                };
-            }
-            catch (error) {
-                this.trackRequest(startTime, false);
-                throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to change ATC contact: ${error.message || 'Unknown error'}`);
-            }
-        });
-    }
+    //     handleAtcChangeContact(args) {
+    //         return __awaiter(this, void 0, void 0, function* () {
+    //             const startTime = performance.now();
+    //             try {
+    //                 const result = yield this.adtclient.atcChangeContact(args.itemUri, args.userId);
+    //                 this.trackRequest(startTime, true);
+    //                 return {
+    //                     content: [
+    //                         {
+    //                             type: 'text',
+    //                             text: JSON.stringify({
+    //                                 status: 'success',
+    //                                 result
+    //                             })
+    //                         }
+    //                     ]
+    //                 };
+    //             }
+    //             catch (error) {
+    //                 this.trackRequest(startTime, false);
+    //                 throw new types_js_1.McpError(types_js_1.ErrorCode.InternalError, `Failed to change ATC contact: ${error.message || 'Unknown error'}`);
+    //             }
+    //         });
+    //     }
 }
 exports.AtcHandlers = AtcHandlers;
