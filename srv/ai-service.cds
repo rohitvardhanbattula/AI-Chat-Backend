@@ -54,6 +54,8 @@ service AIService {
     action login(username: String, password: String)                                                returns AuthTokens;
     action refreshToken(refreshToken: String)                                                       returns AuthTokens;
     action logout(refreshToken: String)                                                             returns String;
+    action forgotPassword(username: String)                                                         returns String;
+    action resetPassword(username: String, otp: String, newPassword: String)                        returns String;
     action getChatSessions()                                                                        returns array of ChatSessions;
     action getChatMessages(sessionId: UUID)                                                         returns array of ChatMessages;
     // Names of the active, admin-maintained BTP Destinations the "Connect to SAP

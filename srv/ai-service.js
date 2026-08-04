@@ -165,7 +165,9 @@ module.exports = cds.service.impl(async function () {
     this.on('verifyOTP', AuthService.verifyOTP);
     this.on('login', AuthService.login);
     this.on('refreshToken', AuthService.refreshToken);
-    this.on('logout', AuthService.logout);
+    this.on('logout',          AuthService.logout);
+    this.on('forgotPassword',  AuthService.forgotPassword);
+    this.on('resetPassword',   AuthService.resetPassword);
 
     // ── SAP ADT MCP — initial connection ──────────────────────────────────
     this.on('establishConnection', async (req) => {
