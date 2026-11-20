@@ -25,7 +25,7 @@ const MAX_INPUT_TOKENS         = 60_000;
 const GPT_MAX_INPUT_TOKENS     = 10_000;
 const CLAUDE_MAX_INPUT_TOKENS  = 15_000;
 const MAX_OUTPUT_TOKENS_GPT    = 4_096;
-const MAX_OUTPUT_TOKENS_CLAUDE = 4_096;
+const MAX_OUTPUT_TOKENS_CLAUDE = 8_192;   // 4k cut long ABAP programs off mid-block
 
 // ── Models ────────────────────────────────────────────────────────────────────
 const CLAUDE_MODEL_SIMPLE  = 'claude-sonnet-4-6';
@@ -38,11 +38,35 @@ const GENHUB_GEMINI_DEPLOYMENT = 'da91e1d34210e9fb';
 const GENHUB_GPT_DEPLOYMENT    = 'd905723f4f0b8b08';
 
 // ── File upload ───────────────────────────────────────────────────────────────
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
-const ALLOWED_MIME_TYPES  = new Set([
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-]);
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB — must match frontend (src/lib/attachments.ts)
+const MIME_PDF  = 'application/pdf';
+const MIME_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+// Browsers/OSes report CSV inconsistently (Windows + Excel often sends vnd.ms-excel).
+const CSV_MIME_TYPES = new Set(['text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel']);
+// Kept for backwards compatibility with anything importing it.
+const ALLOWED_MIME_TYPES = new Set([MIME_PDF, MIME_DOCX, MIME_XLSX, ...CSV_MIME_TYPES]);
+
+const MAX_EXTRACTED_CHARS = 200_000;   // matches the sanitise() ceiling applied to extractedText
+const EXTRACT_TIMEOUT_MS  = 45_000;    // give up on a file that takes longer than this to parse
+const MAX_PDF_PAGES       = 300;
+const MAX_PII_ITEMS       = 300;       // PII items listed individually; the rest are auto-redacted
+
+// Spreadsheet (xlsx / csv) extraction limits
+const SPREADSHEET_LIMITS = {
+    MAX_SHEETS:         20,
+    MAX_ROWS_PER_SHEET: 5_000,
+    MAX_COLS:           100,
+    MAX_CELL_CHARS:     500
+};
+
+// ── Chat request validation ───────────────────────────────────────────────────
+const MAX_PROMPT_CHARS      = 50_000;
+const MAX_SPEC_CHARS        = 200_000;
+const MAX_TITLE_CHARS       = 100;
+const MAX_SEED_MESSAGES     = 4;   // messages a client may seed a new session with (prompt + accepted answer)
+const ALLOWED_MODEL_IDS     = ['claude', 'gpt4o', 'gemini', 'perplexity'];
+const ALLOWED_CATEGORIES    = ['general', 'abap-simple', 'abap-complex'];
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const MAX_FAILED_LOGINS     = 5;
@@ -124,7 +148,10 @@ module.exports = {
     MAX_OUTPUT_TOKENS_GPT, MAX_OUTPUT_TOKENS_CLAUDE,
     CLAUDE_MODEL_SIMPLE, CLAUDE_MODEL_COMPLEX,
     GENHUB_CLAUDE_DEPLOYMENT, GENHUB_GEMINI_DEPLOYMENT, GENHUB_GPT_DEPLOYMENT,
+    MAX_PROMPT_CHARS, MAX_SPEC_CHARS, MAX_TITLE_CHARS, MAX_SEED_MESSAGES, ALLOWED_MODEL_IDS, ALLOWED_CATEGORIES,
     MAX_FILE_SIZE_BYTES, ALLOWED_MIME_TYPES,
+    MIME_PDF, MIME_DOCX, MIME_XLSX, CSV_MIME_TYPES,
+    MAX_EXTRACTED_CHARS, EXTRACT_TIMEOUT_MS, MAX_PDF_PAGES, MAX_PII_ITEMS, SPREADSHEET_LIMITS,
     MAX_FAILED_LOGINS, ACCOUNT_LOCK_DURATION, OTP_EXPIRY_MINUTES,
     BCRYPT_ROUNDS, ALLOWED_EMAIL_DOMAIN,
     ABAP_IGNORE_PHRASES, GITHUB_BASE, SAP_RELEASE_VERSION,

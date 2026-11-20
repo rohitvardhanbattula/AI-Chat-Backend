@@ -3,7 +3,12 @@ const cds = require('@sap/cds');
 const { validateAbapSyntax } = require('./lib/abap/validation');
 const { generateWithValidation } = require('./lib/handlers/GenerationHandler');
 const AuthService = require('./lib/handlers/AuthService');
-const { MAX_PROMPTS_PER_SESSION } = require('./lib/utils/constants');
+const {
+    MAX_PROMPTS_PER_SESSION, MAX_CHATS_PER_USER, MAX_PROMPT_CHARS, MAX_SPEC_CHARS, MAX_TITLE_CHARS,
+    MAX_SEED_MESSAGES, ALLOWED_MODEL_IDS
+} = require('./lib/utils/constants');
+const { AppError, toClientMessage } = require('./lib/utils/errors');
+const { isSessionOwner, SESSION_PUBLIC_COLUMNS } = require('./lib/utils/session-access');
 const { callGemini, callGPT4o, callSAPGenAIHub, callClaude, resolveClaudeModel } = require('./lib/ai/llm-provider');
 const { buildPromptWithContext, GLOBAL_SYSTEM_INSTRUCTION } = require('./lib/utils/helpers');
 const { verifyAccessToken, purgeExpiredTokens, ConfigError } = require('./lib/auth/jwt');
@@ -67,7 +72,9 @@ module.exports = cds.service.impl(async function () {
     this.on('getChatSessions', async (req) => {
         await requireJwt(req);
         const { userId } = req.user;
+        // Explicit columns: never ship the (large) functionalspec to the browser.
         return await SELECT.from('sap.aigateway.ChatSessions')
+            .columns(SESSION_PUBLIC_COLUMNS)
             .where({ userId })
             .orderBy('createdAt desc');
     });
@@ -75,6 +82,7 @@ module.exports = cds.service.impl(async function () {
     this.on('getChatMessages', async (req) => {
         await requireJwt(req);
         const { sessionId } = req.data;
+        if (!(await isSessionOwner(sessionId, req.user.userId))) return req.reject(404, 'Session not found.');
         return await SELECT.from('sap.aigateway.ChatMessages')
             .where({ session_ID: sessionId })
             .orderBy('createdAt asc');
@@ -91,15 +99,34 @@ module.exports = cds.service.impl(async function () {
     this.on('deleteSession', async (req) => {
         await requireJwt(req);
         const { sessionId } = req.data;
-        await DELETE.from('sap.aigateway.ChatSessions').where({ ID: sessionId });
+        const { userId } = req.user;
+        if (!(await isSessionOwner(sessionId, userId))) return req.reject(404, 'Session not found.');
+        // ChatMessages has no FK/composition to ChatSessions, so remove the
+        // messages explicitly — otherwise deleted chats would live on in the DB.
+        await DELETE.from('sap.aigateway.ChatMessages').where({ session_ID: sessionId });
+        await DELETE.from('sap.aigateway.ChatSessions').where({ ID: sessionId, userId });
+        console.log(`[AIService] deleteSession | sessionId=${sessionId} userId=${userId}`);
         return 'deleted';
     });
 
     this.on('createSession', async (req) => {
         await requireJwt(req);
         const { userId } = req.user;
-        const { title, selectedModel, functionalspec, messages } = req.data;
-        const { MAX_CHATS_PER_USER } = require('./lib/utils/constants');
+        const { messages } = req.data;
+        const title          = sanitise(req.data.title, MAX_TITLE_CHARS).trim() || 'New chat';
+        const selectedModel  = sanitise(req.data.selectedModel, 50).toLowerCase();
+        const functionalspec = sanitise(req.data.functionalspec, MAX_SPEC_CHARS) || null;
+
+        if (!ALLOWED_MODEL_IDS.includes(selectedModel)) return req.reject(400, 'Unsupported selectedModel.');
+        if (messages != null) {
+            if (!Array.isArray(messages) || messages.length > MAX_SEED_MESSAGES) {
+                return req.reject(400, `messages must be a list of at most ${MAX_SEED_MESSAGES} items.`);
+            }
+            const bad = messages.find(m =>
+                !['user', 'assistant'].includes(m?.role) ||
+                typeof m.content !== 'string' || m.content.length === 0 || m.content.length > MAX_SPEC_CHARS);
+            if (bad) return req.reject(400, 'Each message needs a role (user/assistant) and non-empty text content.');
+        }
 
         // Lock this user's row for the rest of the transaction. Two concurrent
         // createSession calls for the same user will now serialize here instead
@@ -124,9 +151,9 @@ module.exports = cds.service.impl(async function () {
 
         await INSERT.into('sap.aigateway.ChatSessions').entries({
             ID, userId,
-            title: title.slice(0, 100),
+            title,
             selectedModel,
-            functionalspec: functionalspec ?? null,
+            functionalspec,
             createdAt: now, createdBy: userId,
             modifiedAt: now, modifiedBy: userId
         });
@@ -137,7 +164,7 @@ module.exports = cds.service.impl(async function () {
                 session_ID: ID,
                 role: m.role,
                 content: m.content,
-                modelId: m.modelId || selectedModel,
+                modelId: ALLOWED_MODEL_IDS.includes(m.modelId) ? m.modelId : selectedModel,
                 createdAt: new Date(Date.now() + i).toISOString(),
                 createdBy: userId,
                 modifiedAt: now,
@@ -146,17 +173,25 @@ module.exports = cds.service.impl(async function () {
             await INSERT.into('sap.aigateway.ChatMessages').entries(messageEntries);
         }
 
-        const session = await SELECT.one.from('sap.aigateway.ChatSessions').where({ ID });
+        const session = await SELECT.one.from('sap.aigateway.ChatSessions')
+            .columns(SESSION_PUBLIC_COLUMNS)
+            .where({ ID });
         session.messages = (messages && messages.length > 0)
-            ? await SELECT.from('sap.aigateway.ChatMessages').where({ session_ID: ID })
+            ? await SELECT.from('sap.aigateway.ChatMessages').where({ session_ID: ID }).orderBy('createdAt asc')
             : [];
+        console.log(`[AIService] createSession | sessionId=${ID} userId=${userId} model=${selectedModel} ` +
+            `seedMessages=${session.messages.length} specChars=${functionalspec?.length || 0}`);
         return session;
     });
 
     this.on('renameSession', async (req) => {
         await requireJwt(req);
-        const { sessionId, title } = req.data;
-        await UPDATE('sap.aigateway.ChatSessions').set({ title }).where({ ID: sessionId });
+        const { sessionId } = req.data;
+        const { userId } = req.user;
+        const title = sanitise(req.data.title, MAX_TITLE_CHARS).trim();
+        if (!title) return req.reject(400, 'title is required.');
+        if (!(await isSessionOwner(sessionId, userId))) return req.reject(404, 'Session not found.');
+        await UPDATE('sap.aigateway.ChatSessions').set({ title }).where({ ID: sessionId, userId });
         return 'renamed';
     });
 
@@ -270,13 +305,14 @@ module.exports = cds.service.impl(async function () {
     // ── Rating ─────────────────────────────────────────────────────────────
     this.on('submitRating', async (req) => {
         await requireJwt(req);
+        req.data.userId = req.user.userId; // attribute the rating to the verified caller, not the request body
         return AuthService.submitRating(req);
     });
 
     // ── Streaming (no session — comparison screen) ─────────────────────────
     this.generateStreamNoSession = async function (modelId, prompt, category, extractedText, onChunk, userId, connectionId) {
-        const safePrompt = sanitise(prompt, 50_000);
-        const safeSpec = sanitise(extractedText, 200_000) || null;
+        const safePrompt = sanitise(prompt, MAX_PROMPT_CHARS);
+        const safeSpec = sanitise(extractedText, MAX_SPEC_CHARS) || null;
         incrementPromptCount(userId); // fire-and-forget
         try {
             const output = await generateWithValidation(connectionId || null, modelId, safePrompt, [], category, safeSpec);
@@ -290,9 +326,11 @@ module.exports = cds.service.impl(async function () {
     // ── Streaming (with session — active chat) ─────────────────────────────
     this.generateStream = async function (sessionId, modelId, prompt, category, extractedText, onChunk, userId) {
         const crypto = require('crypto');
-        const safePrompt = sanitise(prompt, 50_000);
-        const safeSpec = sanitise(extractedText, 200_000) || null;
-        incrementPromptCount(userId); // fire-and-forget
+        const safePrompt = sanitise(prompt, MAX_PROMPT_CHARS);
+        const safeSpec = sanitise(extractedText, MAX_SPEC_CHARS) || null;
+        // Without a verified owner the session lookup below would not be scoped
+        // (an undefined value in a where-clause is ignored) — refuse outright.
+        if (!userId) throw new AppError(401, 'Authentication required.');
 
         let session, messagesData;
         const reservedAt = new Date().toISOString();
@@ -306,10 +344,12 @@ module.exports = cds.service.impl(async function () {
         // happen here in one short transaction (milliseconds), closing that
         // window, instead of holding a lock for the entire LLM round-trip.
         await cds.tx(async (tx) => {
+            // Scoped to the caller: a valid session UUID that belongs to someone
+            // else is indistinguishable from one that does not exist.
             session = await tx.run(
-                SELECT.one.from('sap.aigateway.ChatSessions').where({ ID: sessionId }).forUpdate()
+                SELECT.one.from('sap.aigateway.ChatSessions').where({ ID: sessionId, userId }).forUpdate()
             );
-            if (!session) throw new Error('Session not found.');
+            if (!session) throw new AppError(404, 'Session not found.');
 
             messagesData = await tx.run(
                 SELECT.from('sap.aigateway.ChatMessages')
@@ -319,7 +359,7 @@ module.exports = cds.service.impl(async function () {
 
             const userMessageCount = messagesData.reduce((acc, m) => acc + (m.role === 'user' ? 1 : 0), 0);
             if (userMessageCount >= MAX_PROMPTS_PER_SESSION) {
-                throw new Error(`Maximum prompt limit (${MAX_PROMPTS_PER_SESSION}) reached. Please start a new chat.`);
+                throw new AppError(403, `Maximum prompt limit (${MAX_PROMPTS_PER_SESSION}) reached. Please start a new chat.`);
             }
 
             await tx.run(INSERT.into('sap.aigateway.ChatMessages').entries({
@@ -329,6 +369,9 @@ module.exports = cds.service.impl(async function () {
                 modifiedAt: reservedAt, modifiedBy: 'system'
             }));
         });
+
+        // Count the prompt only once it has been accepted (a rejected request is not usage).
+        incrementPromptCount(userId); // fire-and-forget
 
         const functionalSpec = safeSpec || session.functionalspec || null;
         // messagesData was captured BEFORE the reservation insert above, so it
@@ -350,18 +393,13 @@ module.exports = cds.service.impl(async function () {
 
             onChunk(output);
         } catch (err) {
-            console.error('[generateStream]', err?.message);
-            const errMsg = err?.message || 'An unexpected error occurred.';
+            // Full detail goes to the log only. What is persisted and shown to the
+            // user must never include upstream response bodies, SQL or stack text.
+            console.error(`[generateStream] failed | sessionId=${sessionId} userId=${userId} model=${modelId} ` +
+                `ms=${Date.now() - latencyStart} error="${err?.message}"`);
+            const errMsg = toClientMessage(err);
             const latency = Date.now() - latencyStart;
             const now = new Date().toISOString();
-
-            // Re-throw limit errors so the SSE layer can send the correct error
-            // event to the frontend (which shows the "start a new chat" popup).
-            // For all other errors, record the failure in the DB and surface the
-            // real message — never silently swallow it as "model is not available".
-            if (errMsg.includes('Maximum prompt limit')) {
-                throw err;
-            }
 
             await INSERT.into('sap.aigateway.ChatMessages').entries({
                 ID: crypto.randomUUID(), session_ID: sessionId,

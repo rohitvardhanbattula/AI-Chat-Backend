@@ -4,14 +4,63 @@ const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
 const mcpBridge = require('../abap/adt-mcp-bridge');
 const { routeRelevantTools } = require('../../tool-router'); // Dynamic Tool Retrieval
 const {
-    getCachedDestination, trimContext, GLOBAL_SYSTEM_INSTRUCTION, resolveClaudeModel,
+    getCachedDestination, trimContext, truncateSpec, splitToolTurns, normaliseClaudeHistory,
+    GLOBAL_SYSTEM_INSTRUCTION, resolveClaudeModel,
     GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
     CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS,
     MAX_OUTPUT_TOKENS_CLAUDE, CLAUDE_MODEL_SIMPLE, GENHUB_GPT_DEPLOYMENT
 } = require('../utils/helpers');
 
+const { CHARS_PER_TOKEN, MAX_INPUT_TOKENS } = require('../utils/constants');
+
 // Re-export resolveClaudeModel so callers that import it from here continue to work
 module.exports.resolveClaudeModel = resolveClaudeModel;
+
+// ─── Resilience helpers ───────────────────────────────────────────────────────
+const CLAUDE_TIMEOUT_MS      = 180_000;   // a hung upstream call must not hold the user's request open forever
+const MAX_TOOL_RESULT_CHARS  = 30_000;    // one huge table read must not blow the model's context window
+const TRANSIENT_STATUSES     = new Set([408, 425, 429, 500, 502, 503, 504, 529]); // 529 = Anthropic "overloaded"
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function errorStatus(err) {
+    return err?.response?.status ?? err?.status ?? err?.cause?.response?.status;
+}
+
+/** One-line description of an upstream failure, including HTTP status and response body (for logs only). */
+function describeError(err) {
+    const status = errorStatus(err);
+    const raw    = err?.response?.data ?? err?.body;
+    const body   = raw === undefined ? '' : (typeof raw === 'string' ? raw : JSON.stringify(raw));
+    return `${err?.message || err}${status ? ` [status=${status}]` : ''}${body ? ` [body=${body.slice(0, 500)}]` : ''}`;
+}
+
+function isTransient(err) {
+    const status = errorStatus(err);
+    if (status) return TRANSIENT_STATUSES.has(status);
+    if (err?.code === 'ECONNABORTED' || err?.name === 'TimeoutError') return false;   // already waited the full timeout
+    return /ECONNRESET|EAI_AGAIN|ETIMEDOUT|socket hang up|fetch failed|network/i.test(`${err?.code || ''} ${err?.message || ''}`);
+}
+
+/** Retry an upstream call on overload / rate-limit / network blips, with backoff. Anything else fails immediately. */
+async function withTransientRetry(label, fn, { retries = 2, baseDelayMs = 1500 } = {}) {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            if (attempt >= retries || !isTransient(err)) throw err;
+            const retryAfter = Number(err?.response?.headers?.['retry-after'] ?? err?.retryAfter) || 0;
+            const delay = Math.min(10_000, retryAfter > 0 ? retryAfter * 1000 : baseDelayMs * (attempt + 1)) + Math.floor(Math.random() * 300);
+            console.warn(`[${label}] transient failure, retry ${attempt + 1}/${retries} in ${delay}ms: ${describeError(err)}`);
+            await sleep(delay);
+        }
+    }
+}
+
+function capToolResult(text) {
+    if (typeof text !== 'string' || text.length <= MAX_TOOL_RESULT_CHARS) return text;
+    return `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n[RESULT TRUNCATED — ${text.length - MAX_TOOL_RESULT_CHARS} more characters omitted. Ask for a narrower query if you need the rest.]`;
+}
 
 // ─── Agentic tool loop ────────────────────────────────────────────────────────
 // providerCallFn(prompt, systemInstruction, history, tools) → { content, toolCalls }
@@ -144,7 +193,7 @@ async function agenticToolLoop(sessionId, prompt, systemInstruction, history, pr
             if (!existing || (!existing.success && isSuccess)) {
                 allToolResults.set(call.name, { result: resultText, success: isSuccess });
             }
-            toolResults.push({ toolCallId: call.id, name: call.name, result: resultText });
+            toolResults.push({ toolCallId: call.id, name: call.name, result: capToolResult(resultText) });
         }
 
         currentHistory.push({ role: 'assistant', toolCalls: response.toolCalls, content: response.content || '' });
@@ -348,6 +397,34 @@ function applyCacheBreakpoint(history) {
     });
 }
 
+/**
+ * Build a valid Anthropic `messages` array:
+ *
+ *   [ chat history… , the user's prompt , this turn's tool_use / tool_result pairs… ]
+ *
+ * The prompt must come BEFORE the tool turns. Putting it last (as the old code did)
+ * left a first-turn conversation starting with an assistant tool_use, and the
+ * 6-message history window could slice away the user turn or split a
+ * tool_use/tool_result pair — both rejected by the API with HTTP 400, which showed
+ * up as Claude "sometimes failing" once a request needed 1+ tool calls.
+ */
+function buildClaudeMessages(prompt, history, maxTokens) {
+    const { base, toolTurns } = splitToolTurns(history);
+
+    // Keep this turn's tool pairs whole; if they alone are too large drop the OLDEST pairs.
+    const cost = turns => Math.ceil(JSON.stringify(turns).length / CHARS_PER_TOKEN);
+    const keptTools = [...toolTurns];
+    while (keptTools.length > 2 && cost(keptTools) > maxTokens * 0.6) keptTools.splice(0, 2);
+
+    const { history: trimmed, prompt: safePrompt } = trimContext(
+        prompt, normaliseClaudeHistory(base), Math.max(1_000, maxTokens - cost(keptTools))
+    );
+    const chat   = normaliseClaudeHistory([...trimmed, { role: 'user', content: safePrompt }]);
+    const prompt_ = chat[chat.length - 1];
+
+    return [...applyCacheBreakpoint(chat.slice(0, -1)), prompt_, ...sanitiseHistoryForClaude(keptTools)];
+}
+
 // Converts MCP tools to Anthropic tool format
 function mcpToolsToClaudeFormat(tools) {
     const uniqueTools = [
@@ -368,35 +445,36 @@ function mcpToolsToClaudeFormat(tools) {
 // which also always targets one fixed GENHUB_GPT_DEPLOYMENT).
 async function callClaudeViaGenHubInner(functionalSpec) {
     return async function (prompt, systemInstruction, history, tools) {
-        const cleanHistory = sanitiseHistoryForClaude(history);
-        const { history: safeHistory, prompt: safePrompt } = trimContext(prompt, cleanHistory);
-
         const systemText = functionalSpec
-            ? `${systemInstruction}\n\nFunctional Specification Context:\n${functionalSpec}`
+            ? `${systemInstruction}\n\nFunctional Specification Context:\n${truncateSpec(functionalSpec, 2000)}` // large spreadsheets/documents must not exceed the context window
             : systemInstruction;
-        const messages = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
+        const messages = buildClaudeMessages(prompt, history, MAX_INPUT_TOKENS);
 
         const body = {
             anthropic_version: 'bedrock-2023-05-31',
             system: systemText,
-            max_tokens: 5000,
+            max_tokens: MAX_OUTPUT_TOKENS_CLAUDE,
             messages
         };
         if (tools.length > 0) {
             body.tools = mcpToolsToClaudeFormat(tools);
         }
 
-        const response = await executeHttpRequest(
+        const response = await withTransientRetry('callClaude:genhub', () => executeHttpRequest(
             { destinationName: 'GENERATIVE_AI_HUB' },
             {
                 method: 'POST',
                 url: `/inference/deployments/${GENHUB_CLAUDE_DEPLOYMENT}/invoke`,
                 headers: { 'Content-Type': 'application/json', 'AI-Resource-Group': 'default' },
-                data: body
+                data: body,
+                timeout: CLAUDE_TIMEOUT_MS
             },
             { fetchCsrfToken: false }
-        );
+        ));
 
+        if (response.data?.stop_reason === 'max_tokens') {
+            console.warn(`[callClaude:genhub] output hit max_tokens (${MAX_OUTPUT_TOKENS_CLAUDE}) — response may be cut off`);
+        }
         const contentBlocks = response.data?.content || [];
         const text = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('');
         const toolUses = contentBlocks.filter(b => b.type === 'tool_use');
@@ -412,12 +490,7 @@ async function callClaudeViaGenHubInner(functionalSpec) {
 // Inner provider fn used by agenticToolLoop for Claude via direct API key
 async function callClaudeViaApiKeyInner(model, functionalSpec, apikey, category) {
     return async function (prompt, systemInstruction, history, tools) {
-        const cleanHistory = sanitiseHistoryForClaude(history);
-        const { history: safeHistory, prompt: safePrompt } = trimContext(
-            prompt, cleanHistory, CLAUDE_MAX_INPUT_TOKENS
-        );
-
-        const messages = [...applyCacheBreakpoint(safeHistory), { role: 'user', content: safePrompt }];
+        const messages = buildClaudeMessages(prompt, history, CLAUDE_MAX_INPUT_TOKENS);
         const systemBlocks = require('../utils/helpers').buildClaudeSystemBlocks(functionalSpec, category);
 
         const body = { model, max_tokens: MAX_OUTPUT_TOKENS_CLAUDE, system: systemBlocks, messages };
@@ -425,23 +498,32 @@ async function callClaudeViaApiKeyInner(model, functionalSpec, apikey, category)
             body.tools = mcpToolsToClaudeFormat(tools);
         }
 
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'x-api-key': apikey,
-                'anthropic-version': '2023-06-01',
-                'anthropic-beta': 'prompt-caching-2024-07-31',
-                'content-type': 'application/json'
-            },
-            body: JSON.stringify(body)
+        const data = await withTransientRetry('callClaude:api', async () => {
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'x-api-key': apikey,
+                    'anthropic-version': '2023-06-01',
+                    'anthropic-beta': 'prompt-caching-2024-07-31',
+                    'content-type': 'application/json'
+                },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(CLAUDE_TIMEOUT_MS)
+            });
+
+            if (!response.ok) {
+                const errBody = await response.text().catch(() => '');
+                throw Object.assign(new Error(`Claude API returned ${response.status}: ${errBody.slice(0, 500)}`), {
+                    status: response.status,
+                    retryAfter: Number(response.headers.get('retry-after')) || 0
+                });
+            }
+            return response.json();
         });
 
-        if (!response.ok) {
-            const errBody = await response.text().catch(() => '');
-            throw new Error(`Claude API returned ${response.status}: ${errBody.slice(0, 200)}`);
+        if (data?.stop_reason === 'max_tokens') {
+            console.warn(`[callClaude:api] output hit max_tokens (${MAX_OUTPUT_TOKENS_CLAUDE}) — response may be cut off`);
         }
-
-        const data = await response.json();
         const contentBlocks = data?.content || [];
         const text = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('');
         const toolUses = contentBlocks.filter(b => b.type === 'tool_use');
@@ -469,7 +551,7 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
         const content = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
         return { modelId: 'claude', content, latency: Date.now() - start, model: 'genhub-fixed-deployment' };
     } catch (hubErr) {
-        console.warn('callClaude: GenAI Hub failed, falling back to API key:', hubErr?.message);
+        console.warn(`callClaude: GenAI Hub failed, falling back to API key | session=${sessionId || 'none'} ${describeError(hubErr)}`);
         try {
             const dest = await getCachedDestination('claude_api');
             const apikey = dest.originalProperties?.apikey;
@@ -479,7 +561,7 @@ async function callClaude(sessionId, prompt, history = [], model = CLAUDE_MODEL_
             const content = await agenticToolLoop(sessionId, prompt, systemInstruction, history, providerFn);
             return { modelId: 'claude', content, latency: Date.now() - start, model };
         } catch (fallbackErr) {
-            console.error('callClaude: fallback also failed:', fallbackErr?.message);
+            console.error(`callClaude: fallback also failed | session=${sessionId || 'none'} ${describeError(fallbackErr)} | original GenAI Hub error: ${describeError(hubErr)}`);
             throw fallbackErr;
         }
     }
@@ -613,4 +695,4 @@ async function callSAPGenAIHub(sessionId, prompt, systemInstruction, history = [
     }
 }
 
-module.exports = { callGemini, callClaude, callGPT4o, callSAPGenAIHub, resolveClaudeModel };
+module.exports = { callGemini, callClaude, callGPT4o, callSAPGenAIHub, resolveClaudeModel, buildClaudeMessages, withTransientRetry };

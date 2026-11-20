@@ -83,6 +83,37 @@ function trimContext(prompt, history, maxTokens = MAX_INPUT_TOKENS) {
     return { history: trimmed, prompt: finalPrompt };
 }
 
+// ─── Claude conversation shaping ──────────────────────────────────────────────
+/**
+ * Split an agentic history into the plain chat history and the tool turns of the
+ * CURRENT request. Stored (DB) history never contains tool turns, so the first
+ * assistant-toolCalls / tool message marks where this turn's tool loop begins.
+ */
+function splitToolTurns(history) {
+    const idx = history.findIndex(m => m.toolCalls || m.role === 'tool');
+    return idx === -1
+        ? { base: history, toolTurns: [] }
+        : { base: history.slice(0, idx), toolTurns: history.slice(idx) };
+}
+
+/**
+ * Make plain chat history acceptable to the Anthropic Messages API:
+ *   - no blank messages (blank text blocks are rejected, esp. with cache_control)
+ *   - consecutive same-role messages are merged (a failed turn can leave two user messages in a row)
+ *   - the first message must be a user message (a trimmed window can start with an assistant reply)
+ */
+function normaliseClaudeHistory(history) {
+    const merged = [];
+    for (const m of history) {
+        if ((m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string' || !m.content.trim()) continue;
+        const last = merged[merged.length - 1];
+        if (last && last.role === m.role) last.content = `${last.content}\n\n${m.content}`;
+        else merged.push({ role: m.role, content: m.content });
+    }
+    while (merged.length && merged[0].role !== 'user') merged.shift();
+    return merged;
+}
+
 // ─── Spec truncation ──────────────────────────────────────────────────────────
 function truncateSpec(spec, reserve = 1000) {
     const limit = (MAX_INPUT_TOKENS * CHARS_PER_TOKEN) - reserve;
@@ -154,7 +185,7 @@ function buildFinalReport(generatedText, feedback) {
 }
 
 module.exports = {
-    getCachedDestination, trimContext, truncateSpec, buildPromptWithContext,
+    getCachedDestination, trimContext, truncateSpec, buildPromptWithContext, splitToolTurns, normaliseClaudeHistory,
     buildClaudeSystemBlocks, resolveClaudeModel, buildRetryPrompt, buildFinalReport,
     GLOBAL_SYSTEM_INSTRUCTION, GENERAL_SYSTEM_INSTRUCTION,
     GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,

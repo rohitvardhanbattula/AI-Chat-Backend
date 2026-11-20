@@ -18,11 +18,12 @@
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
     "express": "^4",
     "express-rate-limit": "^8.2.1",
     "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.8.0",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.0.2",
     "pdf-parse": "^1.1.1",
     "uuid": "^14.0.1"
   },
@@ -68,6 +69,7 @@
   },
   "scripts": {
     "start": "cds-serve",
+    "test": "node --test \"test/*.test.js\"",
     "start:prod": "NODE_ENV=production cds-serve",
     "deploy:hana": "cds deploy --to hana"
   },
