@@ -11,7 +11,7 @@ const {
     MAX_OUTPUT_TOKENS_CLAUDE, CLAUDE_MODEL_SIMPLE, GENHUB_GPT_DEPLOYMENT
 } = require('../utils/helpers');
 
-const { CHARS_PER_TOKEN, MAX_INPUT_TOKENS } = require('../utils/constants');
+const { CHARS_PER_TOKEN, MAX_INPUT_TOKENS, CLAUDE_MAX_SPEC_CHARS } = require('../utils/constants');
 
 // Re-export resolveClaudeModel so callers that import it from here continue to work
 module.exports.resolveClaudeModel = resolveClaudeModel;
@@ -446,7 +446,7 @@ function mcpToolsToClaudeFormat(tools) {
 async function callClaudeViaGenHubInner(functionalSpec) {
     return async function (prompt, systemInstruction, history, tools) {
         const systemText = functionalSpec
-            ? `${systemInstruction}\n\nFunctional Specification Context:\n${truncateSpec(functionalSpec, 2000)}` // large spreadsheets/documents must not exceed the context window
+            ? `${systemInstruction}\n\nFunctional Specification Context:\n${truncateSpec(functionalSpec, 2000, CLAUDE_MAX_SPEC_CHARS)}` // large spreadsheets/documents must not exceed the context window
             : systemInstruction;
         const messages = buildClaudeMessages(prompt, history, MAX_INPUT_TOKENS);
 

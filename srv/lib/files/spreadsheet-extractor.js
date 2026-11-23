@@ -51,15 +51,17 @@ function columnLetter(index) { // 0 → A, 25 → Z, 26 → AA
 }
 
 function toMarkdownTable(rows) {
-    const width  = Math.min(MAX_COLS, rows.reduce((w, r) => Math.max(w, r.length), 0));
-    const pad    = r => Array.from({ length: width }, (_, i) => r[i] ?? '');
-    const header = pad(rows[0]).map((h, i) => h || columnLetter(i));
-    const lines  = [
-        `| ${header.join(' | ')} |`,
-        `| ${header.map(() => '---').join(' | ')} |`,
-        ...rows.slice(1).map(r => `| ${pad(r).join(' | ')} |`)
+    const width = Math.min(MAX_COLS, rows.reduce((w, r) => Math.max(w, r.length), 0));
+    // Columns with no value in any row (common in ATC / SAP exports) only cost tokens.
+    const body = rows.length > 1 ? rows.slice(1) : rows;
+    const keep = Array.from({ length: width }, (_, i) => i).filter(i => body.some(r => r[i]));
+    const line = (r, fill) => `|${keep.map(i => r[i] || (fill ? fill(i) : '')).join('|')}|`;   // no padding spaces: ~2 chars saved per cell
+    const out  = [
+        line(rows[0], columnLetter),
+        `|${keep.map(() => '---').join('|')}|`,
+        ...rows.slice(1).map(r => line(r))
     ];
-    return { markdown: lines.join('\n'), columns: width };
+    return { markdown: out.join('\n'), columns: keep.length };
 }
 
 // ── XLSX ──────────────────────────────────────────────────────────────────────
@@ -96,7 +98,7 @@ async function extractXlsx(buffer, fileName) {
             while (cells.length && !cells[cells.length - 1]) cells.pop();                // trim trailing empties
             if (cells.length === 0) continue;                                            // skip blank rows
             rows.push(cells);
-            used += cells.reduce((n, c) => n + c.length + 3, 0);
+            used += cells.reduce((n, c) => n + c.length + 1, 0);
         }
 
         if (rows.length === 0) { sheets.push({ name: ws.name, rows: 0, columns: 0, truncated: false }); continue; }

@@ -4,7 +4,7 @@ const {
     MAX_INPUT_TOKENS, CHARS_PER_TOKEN, MAX_HISTORY_MESSAGES,
     CLAUDE_MODEL_COMPLEX, CLAUDE_MODEL_SIMPLE, GLOBAL_SYSTEM_INSTRUCTION, GENERAL_SYSTEM_INSTRUCTION,
     GENHUB_GEMINI_DEPLOYMENT, GENHUB_CLAUDE_DEPLOYMENT,
-    CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS, MAX_OUTPUT_TOKENS_CLAUDE,GENHUB_GPT_DEPLOYMENT
+    CLAUDE_MAX_INPUT_TOKENS, GPT_MAX_INPUT_TOKENS, MAX_OUTPUT_TOKENS_CLAUDE, CLAUDE_MAX_SPEC_CHARS, GENHUB_GPT_DEPLOYMENT
 } = require('./constants');
 
 // ─── Destination cache ────────────────────────────────────────────────────────
@@ -115,8 +115,8 @@ function normaliseClaudeHistory(history) {
 }
 
 // ─── Spec truncation ──────────────────────────────────────────────────────────
-function truncateSpec(spec, reserve = 1000) {
-    const limit = (MAX_INPUT_TOKENS * CHARS_PER_TOKEN) - reserve;
+function truncateSpec(spec, reserve = 1000, maxChars = MAX_INPUT_TOKENS * CHARS_PER_TOKEN) {
+    const limit = maxChars - reserve;
     return spec.length > limit
         ? spec.slice(0, limit) + '\n\n[DOCUMENT TRUNCATED DUE TO LENGTH]'
         : spec;
@@ -135,7 +135,7 @@ function buildClaudeSystemBlocks(functionalSpec, category) {
     if (functionalSpec) {
         blocks.push({
             type:          'text',
-            text:          `Functional Specification Context:\n${truncateSpec(functionalSpec, 2000)}`,
+            text:          `Functional Specification Context:\n${truncateSpec(functionalSpec, 2000, CLAUDE_MAX_SPEC_CHARS)}`,
             cache_control: { type: 'ephemeral' }
         });
     }

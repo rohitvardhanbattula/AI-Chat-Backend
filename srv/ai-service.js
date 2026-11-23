@@ -279,7 +279,7 @@ module.exports = cds.service.impl(async function () {
         await requireJwt(req);
         const prompt = sanitise(req.data.prompt, 50_000);
         const category = sanitise(req.data.category, 100);
-        const extractedText = sanitise(req.data.extractedText, 200_000) || null;
+        const extractedText = sanitise(req.data.extractedText, MAX_SPEC_CHARS) || null;
         const connectionId = sanitise(req.data.connectionId, 100) || null;
         if (!prompt) return req.reject(400, 'prompt is required.');
 

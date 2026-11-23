@@ -47,7 +47,8 @@ const CSV_MIME_TYPES = new Set(['text/csv', 'application/csv', 'text/plain', 'ap
 // Kept for backwards compatibility with anything importing it.
 const ALLOWED_MIME_TYPES = new Set([MIME_PDF, MIME_DOCX, MIME_XLSX, ...CSV_MIME_TYPES]);
 
-const MAX_EXTRACTED_CHARS = 200_000;   // matches the sanitise() ceiling applied to extractedText
+const MAX_EXTRACTED_CHARS = 500_000;   // ≈130-170k tokens: fits Claude's 200k window; 200k chars cut a 2,857-row ATC sheet off at ~1,000 rows
+const CLAUDE_MAX_SPEC_CHARS = MAX_EXTRACTED_CHARS;
 const EXTRACT_TIMEOUT_MS  = 45_000;    // give up on a file that takes longer than this to parse
 const MAX_PDF_PAGES       = 300;
 const MAX_PII_ITEMS       = 300;       // PII items listed individually; the rest are auto-redacted
@@ -62,7 +63,7 @@ const SPREADSHEET_LIMITS = {
 
 // ── Chat request validation ───────────────────────────────────────────────────
 const MAX_PROMPT_CHARS      = 50_000;
-const MAX_SPEC_CHARS        = 200_000;
+const MAX_SPEC_CHARS        = MAX_EXTRACTED_CHARS;
 const MAX_TITLE_CHARS       = 100;
 const MAX_SEED_MESSAGES     = 4;   // messages a client may seed a new session with (prompt + accepted answer)
 const ALLOWED_MODEL_IDS     = ['claude', 'gpt4o', 'gemini', 'perplexity'];
@@ -148,7 +149,7 @@ module.exports = {
     MAX_OUTPUT_TOKENS_GPT, MAX_OUTPUT_TOKENS_CLAUDE,
     CLAUDE_MODEL_SIMPLE, CLAUDE_MODEL_COMPLEX,
     GENHUB_CLAUDE_DEPLOYMENT, GENHUB_GEMINI_DEPLOYMENT, GENHUB_GPT_DEPLOYMENT,
-    MAX_PROMPT_CHARS, MAX_SPEC_CHARS, MAX_TITLE_CHARS, MAX_SEED_MESSAGES, ALLOWED_MODEL_IDS, ALLOWED_CATEGORIES,
+    MAX_PROMPT_CHARS, MAX_SPEC_CHARS, CLAUDE_MAX_SPEC_CHARS, MAX_TITLE_CHARS, MAX_SEED_MESSAGES, ALLOWED_MODEL_IDS, ALLOWED_CATEGORIES,
     MAX_FILE_SIZE_BYTES, ALLOWED_MIME_TYPES,
     MIME_PDF, MIME_DOCX, MIME_XLSX, CSV_MIME_TYPES,
     MAX_EXTRACTED_CHARS, EXTRACT_TIMEOUT_MS, MAX_PDF_PAGES, MAX_PII_ITEMS, SPREADSHEET_LIMITS,
